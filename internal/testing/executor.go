@@ -348,7 +348,13 @@ func (e *Executor) EvaluateInlineTestsWithCluster(
 
 	evaluator := eval.NewCoreEvaluator()
 	builtinRegistry := runtime.NewBuiltinRegistry(evaluator)
-	resolver := runtime.NewBuiltinOnlyResolver(builtinRegistry)
+	env := evaluator.Env()
+	e.injectModuleBindings(evaluator, env)
+	resolver := &CombinedResolver{
+		Builtins: builtinRegistry,
+		Env:      env,
+		Modules:  e.modules,
+	}
 	evaluator.SetGlobalResolver(resolver)
 	e.injectADTConstructors(evaluator)
 
@@ -430,4 +436,121 @@ func (e *Executor) HasCrossFunctionDependencies(
 	sccs := ComputeSCCs(g)
 	closure := GetDependencyClosure(g, sccs, functionName)
 	return len(closure) > 1
+}
+
+// LoadModule compiles the source file through the pipeline to populate e.modules.
+// Safe to call multiple times — returns immediately if modules already loaded.
+func (e *Executor) LoadModule() error {
+	if len(e.modules) > 0 {
+		return nil
+	}
+	if e.sourceFile == nil || e.modulePath == "" {
+		return nil
+	}
+	sourceCode, err := os.ReadFile(e.modulePath)
+	if err != nil {
+		return fmt.Errorf("failed to read source file: %w", err)
+	}
+	strippedSource := e.stripNonPureFunctions(string(sourceCode), e.sourceFile)
+	cfg := pipeline.Config{Mode: pipeline.ModeEval, RelaxModules: true}
+	src := pipeline.Source{Code: strippedSource, Filename: e.modulePath, IsREPL: false}
+	result, err := pipeline.Run(cfg, src)
+	if err != nil {
+		return err
+	}
+	e.modules = result.Modules
+	return nil
+}
+
+// ExtractNamedTestBodyText returns the text inside the braces of `test "name" { ... }`
+// by searching the source file for the test declaration and brace-matching.
+func (e *Executor) ExtractNamedTestBodyText(testName string, loc ast.Pos) (string, error) {
+	sourceCode, err := os.ReadFile(e.modulePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read source: %w", err)
+	}
+	src := string(sourceCode)
+
+	// Find the test "name" declaration after the declaration position
+	searchStr := `test "` + testName + `"`
+	idx := strings.Index(src, searchStr)
+	if idx < 0 {
+		return "", fmt.Errorf("test %q not found in source", testName)
+	}
+
+	// Find the opening brace after the test name
+	braceStart := strings.Index(src[idx:], "{")
+	if braceStart < 0 {
+		return "", fmt.Errorf("no opening brace for test %q", testName)
+	}
+	start := idx + braceStart + 1 // position after '{'
+
+	// Brace-match to find closing brace
+	depth := 1
+	pos := start
+	for pos < len(src) && depth > 0 {
+		switch src[pos] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+		}
+		pos++
+	}
+	if depth != 0 {
+		return "", fmt.Errorf("unmatched braces in test %q", testName)
+	}
+	body := strings.TrimSpace(src[start : pos-1])
+	return body, nil
+}
+
+// CallZeroArgFunction evaluates a zero-argument function from a Core program.
+func (e *Executor) CallZeroArgFunction(funcName string, coreProg *core.Program) (eval.Value, error) {
+	// Find the binding
+	var binding *core.RecBinding
+	for _, decl := range coreProg.Decls {
+		if letRec, ok := decl.(*core.LetRec); ok {
+			for i, b := range letRec.Bindings {
+				if b.Name == funcName {
+					binding = &letRec.Bindings[i]
+					break
+				}
+			}
+		}
+		if let, ok := decl.(*core.Let); ok && let.Name == funcName {
+			b := core.RecBinding{Name: let.Name, Value: let.Value}
+			binding = &b
+		}
+		if binding != nil {
+			break
+		}
+	}
+	if binding == nil {
+		return nil, fmt.Errorf("function %q not found in compiled program", funcName)
+	}
+
+	// Build: letrec funcName = binding.Value in funcName()
+	callExpr := &core.App{
+		Func: &core.Var{Name: funcName},
+		Args: []core.CoreExpr{},
+	}
+	harness := &core.LetRec{
+		Bindings: []core.RecBinding{*binding},
+		Body:     callExpr,
+	}
+	prog := &core.Program{Decls: []core.CoreExpr{harness}}
+
+	evaluator := eval.NewCoreEvaluator()
+	builtinRegistry := runtime.NewBuiltinRegistry(evaluator)
+	env := evaluator.Env()
+	e.injectModuleBindings(evaluator, env)
+	resolver := &CombinedResolver{
+		Builtins: builtinRegistry,
+		Env:      env,
+		Modules:  e.modules,
+	}
+	evaluator.SetGlobalResolver(resolver)
+	e.injectADTConstructors(evaluator)
+
+	return evaluator.EvalCoreProgram(prog)
 }

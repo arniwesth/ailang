@@ -636,11 +636,29 @@ func assembleModuleResult(
 			}
 		}
 
-		// Initialize empty maps for compatibility with loader interface
-		// (The actual export/type/constructor information is in the Iface)
+		// Populate exports from surface AST
 		loaded.Exports = make(map[string]*ast.FuncDecl)
+		if unit.Surface != nil {
+			for _, decl := range unit.Surface.Decls {
+				if fn, ok := decl.(*ast.FuncDecl); ok && fn.IsExport {
+					loaded.Exports[fn.Name] = fn
+				}
+			}
+		}
+
+		// Populate types and constructors from surface AST and compile unit
 		loaded.Types = make(map[string]*ast.TypeDecl)
+		if unit.Surface != nil {
+			for _, decl := range unit.Surface.Decls {
+				if td, ok := decl.(*ast.TypeDecl); ok {
+					loaded.Types[td.Name] = td
+				}
+			}
+		}
 		loaded.Constructors = make(map[string]string)
+		for ctorName, ctorInfo := range unit.Constructors {
+			loaded.Constructors[ctorName] = ctorInfo.TypeName
+		}
 
 		modules[modID] = loaded
 	}
