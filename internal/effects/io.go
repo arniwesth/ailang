@@ -13,6 +13,7 @@ func init() {
 	RegisterOp("IO", "print", ioPrint)
 	RegisterOp("IO", "println", ioPrintln)
 	RegisterOp("IO", "readLine", ioReadLine)
+	RegisterOp("IO", "pollStdin", ioPollStdin)
 	RegisterOp("IO", "writeBytes", ioWriteBytes)
 	RegisterOp("IO", "exit", ioExit)
 }
@@ -111,6 +112,70 @@ func ioReadLine(ctx *EffContext, args []eval.Value) (eval.Value, error) {
 	// Trim trailing newline
 	line = strings.TrimSuffix(line, "\n")
 	// Also trim \r on Windows
+	line = strings.TrimSuffix(line, "\r")
+
+	return &eval.StringValue{Value: line}, nil
+}
+
+// ioPollStdin implements IO.pollStdin() -> String
+//
+// Non-blocking stdin peek. If a complete line (terminated by \n) is buffered,
+// returns it without the trailing newline. Otherwise returns "" immediately.
+//
+// This enables the SWE agent brain to check for abort/model_change commands
+// from the TypeScript parent without blocking the recursive rpc_loop.
+//
+// Parameters:
+//   - ctx: Effect context (capability check already done by Call())
+//   - args: [] - no arguments
+//
+// Returns:
+//   - StringValue with the pending line (without \n), or "" if nothing buffered
+//   - Error if wrong number of arguments
+//
+// Implementation notes:
+//   We peek at the bufio.Reader buffer without blocking. Only data already
+//   buffered by Go's reader (i.e. previously read from the fd) is visible.
+//   This is sufficient because the TypeScript parent writes complete JSONL
+//   commands terminated by \n, and the OS pipe buffer delivers them promptly.
+func ioPollStdin(ctx *EffContext, args []eval.Value) (eval.Value, error) {
+	if len(args) != 0 {
+		return nil, fmt.Errorf("pollStdin: expected 0 arguments, got %d", len(args))
+	}
+
+	reader := ctx.GetIOReader()
+	if reader == nil {
+		return &eval.StringValue{Value: ""}, nil
+	}
+
+	// bufio.Reader.Buffered() returns the number of bytes in the read buffer.
+	if reader.Buffered() == 0 {
+		return &eval.StringValue{Value: ""}, nil
+	}
+
+	// Peek without consuming. Check for a complete line (\n) in the buffer.
+	peek, _ := reader.Peek(reader.Buffered())
+	idx := -1
+	for i, b := range peek {
+		if b == '\n' {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		// No complete line buffered yet
+		return &eval.StringValue{Value: ""}, nil
+	}
+
+	// A complete line is available — read it (ReadString consumes from buffer).
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		// Unexpected error during read of data we already peeked; return "".
+		return &eval.StringValue{Value: ""}, nil
+	}
+
+	// Trim trailing newline (and \r for safety)
+	line = strings.TrimSuffix(line, "\n")
 	line = strings.TrimSuffix(line, "\r")
 
 	return &eval.StringValue{Value: line}, nil
