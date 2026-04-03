@@ -137,8 +137,7 @@ func (r *Runner) runTest(testCase TestCase) TestResult {
 		// All tests passed
 		result.Status = StatusPass
 	} else {
-		// Non-inline tests (test "name" { ... } blocks)
-		// For now, skip these - they're less common
+		// Named test blocks: not yet implemented, skip
 		result.Status = StatusSkip
 		result.Error = "Named test blocks not yet implemented"
 	}

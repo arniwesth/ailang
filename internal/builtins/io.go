@@ -121,6 +121,52 @@ func registerIO() {
 		panic(fmt.Sprintf("failed to register _io_readLine: %v", err))
 	}
 
+	// _io_poll_stdin — non-blocking stdin peek
+	// Returns "" if no complete line is buffered, or the next line (without \n).
+	implPollStdin := func(ctx *effects.EffContext, args []eval.Value) (eval.Value, error) {
+		if len(args) != 1 {
+			panic("internal invariant violation: _io_poll_stdin expects exactly 1 argument (unit)")
+		}
+		if _, ok := args[0].(*eval.UnitValue); !ok {
+			panic("internal invariant violation: _io_poll_stdin expected unit argument")
+		}
+		return effects.Call(ctx, "IO", "pollStdin", nil)
+	}
+	typePollStdin := func() types.Type {
+		T := types.NewBuilder()
+		return T.Func(T.Unit()).Returns(T.String()).Effects("IO")
+	}
+	err = RegisterEffectBuiltin(BuiltinSpec{
+		Module: "std/io",
+		Name:   "_io_poll_stdin",
+		NumArgs: 1,
+		IsPure:  false,
+		Effect:  "IO",
+		Type:    typePollStdin,
+		Impl:    implPollStdin,
+		Metadata: &BuiltinMetadata{
+			Description: "Non-blocking stdin peek; returns empty string if nothing ready",
+			LongDesc: `Polls stdin without blocking. If a complete line (terminated by \n) is
+available in the buffer, returns it without the trailing newline.
+If nothing is buffered, returns "" immediately.
+
+Used by the SWE agent brain to check for abort/model_change commands
+from the TypeScript parent process at the top of each loop iteration.`,
+			Params:  []ParamDoc{},
+			Returns: "String: the pending line, or \"\" if nothing available",
+			Examples: []Example{
+				{Code: `let line = _io_poll_stdin(())`, Description: "Check for pending input"},
+			},
+			Since:     "v0.5.x",
+			Stability: StabilityExperimental,
+			Tags:      []string{"io", "poll", "stdin", "non-blocking"},
+			Category:  "io",
+		},
+	})
+	if err != nil {
+		panic(fmt.Sprintf("failed to register _io_poll_stdin: %v", err))
+	}
+
 	// _io_exit — terminate process with exit code
 	impl5 := func(ctx *effects.EffContext, args []eval.Value) (eval.Value, error) {
 		return effects.Call(ctx, "IO", "exit", args)

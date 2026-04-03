@@ -10,10 +10,11 @@ import (
 type ProviderType string
 
 const (
-	ProviderOpenAI    ProviderType = "openai"
-	ProviderAnthropic ProviderType = "anthropic"
-	ProviderGoogle    ProviderType = "google"
-	ProviderOllama    ProviderType = "ollama"
+	ProviderOpenAI     ProviderType = "openai"
+	ProviderAnthropic  ProviderType = "anthropic"
+	ProviderGoogle     ProviderType = "google"
+	ProviderOllama     ProviderType = "ollama"
+	ProviderOpenRouter ProviderType = "openrouter"
 )
 
 // ModelConfig contains provider-specific model configuration.
@@ -32,6 +33,11 @@ func GuessProvider(modelName string) ProviderType {
 	// Check for explicit ollama: prefix first (highest priority)
 	if strings.HasPrefix(lower, "ollama:") {
 		return ProviderOllama
+	}
+
+	// Check for explicit openrouter/ prefix
+	if strings.HasPrefix(lower, "openrouter/") {
+		return ProviderOpenRouter
 	}
 
 	// Check prefixes
@@ -81,6 +87,8 @@ func GetAPIKey(provider ProviderType) (string, error) {
 	case ProviderOllama:
 		// Ollama is local, no API key needed
 		return "", nil
+	case ProviderOpenRouter:
+		envVar = "OPENROUTER_API_KEY"
 	default:
 		return "", fmt.Errorf("unknown provider: %s", provider)
 	}
@@ -103,6 +111,8 @@ func ProviderFromString(s string) ProviderType {
 		return ProviderGoogle
 	case "ollama":
 		return ProviderOllama
+	case "openrouter":
+		return ProviderOpenRouter
 	default:
 		return ProviderType(s)
 	}

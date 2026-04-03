@@ -119,10 +119,18 @@ func (c *Client) generateChat(ctx context.Context, req *ai.Request) (*ai.Respons
 	}
 
 	if len(result.Choices) == 0 {
+		// OpenRouter (and some proxies) return HTTP 200 with an error object
+		// and an empty choices array when the model is unavailable or rate-limited.
+		if result.Error != nil && result.Error.Message != "" {
+			return nil, ai.NewProviderError("openai", 0, result.Error.Message, nil)
+		}
 		return nil, ai.NewProviderError("openai", 0, "no choices in response", nil)
 	}
 
 	text := result.Choices[0].Message.Content
+	if reasoning := result.Choices[0].Message.Reasoning; reasoning != "" {
+		text = "<think>\n" + reasoning + "\n</think>\n\n" + text
+	}
 
 	// Calculate output tokens
 	// For GPT-5+ reasoning models, completion_tokens includes reasoning_tokens
