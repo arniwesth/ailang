@@ -109,6 +109,15 @@ func setupAIHandler(effCtx *effects.EffContext, aiStub bool, aiModel string) err
 		}
 		handler = client.NewHandler(model.APIName, opts...)
 
+	case ai.ProviderOpenRouter:
+		if apiKey == "" {
+			return fmt.Errorf("%s environment variable required for model %s", model.EnvVar, aiModel)
+		}
+		client := openai.NewClient(apiKey, openai.WithBaseURL("https://openrouter.ai/api/v1"))
+		// Strip openrouter/ prefix to get the bare model id for the API
+		modelName := strings.TrimPrefix(model.APIName, "openrouter/")
+		handler = client.NewHandler(modelName, opts...)
+
 	default:
 		return fmt.Errorf("unsupported AI provider: %s", model.Provider)
 	}
@@ -117,11 +126,28 @@ func setupAIHandler(effCtx *effects.EffContext, aiStub bool, aiModel string) err
 	return nil
 }
 
+// stripProviderPrefix removes a known provider prefix from a model name so
+// the bare API model id is passed to the provider client.
+// Examples:
+//
+//	"anthropic/claude-sonnet-4-6"          → "claude-sonnet-4-6"
+//	"openai/gpt-4o"                        → "gpt-4o"
+//	"google/gemini-2.5-flash"              → "gemini-2.5-flash"
+//	"openrouter/meta-llama/llama-3.3-70b"  → "meta-llama/llama-3.3-70b"
+//	"claude-sonnet-4-6"                    → "claude-sonnet-4-6"  (unchanged)
+func stripProviderPrefix(modelName string, provider ai.ProviderType) string {
+	prefix := string(provider) + "/"
+	return strings.TrimPrefix(modelName, prefix)
+}
+
 // setupAIHandlerDirect creates an AI handler using the model name directly
 // (fallback when models.yml is not available).
 func setupAIHandlerDirect(effCtx *effects.EffContext, modelName string) error {
 	// Guess provider from model name
 	provider := ai.GuessProvider(modelName)
+
+	// Strip the "provider/" prefix so each client receives the bare API model id.
+	bareModel := stripProviderPrefix(modelName, provider)
 
 	var handler effects.AIHandler
 
@@ -132,7 +158,7 @@ func setupAIHandlerDirect(effCtx *effects.EffContext, modelName string) error {
 			return fmt.Errorf("ANTHROPIC_API_KEY environment variable required")
 		}
 		client := anthropic.NewClient(apiKey)
-		handler = client.NewHandler(modelName)
+		handler = client.NewHandler(bareModel)
 
 	case ai.ProviderOpenAI:
 		apiKey := os.Getenv("OPENAI_API_KEY")
@@ -140,18 +166,18 @@ func setupAIHandlerDirect(effCtx *effects.EffContext, modelName string) error {
 			return fmt.Errorf("OPENAI_API_KEY environment variable required")
 		}
 		client := openai.NewClient(apiKey)
-		handler = client.NewHandler(modelName)
+		handler = client.NewHandler(bareModel)
 
 	case ai.ProviderGoogle:
 		// Precedence: ADC first (if available), then GOOGLE_API_KEY.
 		apiKey := os.Getenv("GOOGLE_API_KEY")
 		if client, err := gemini.NewVertexAIClient(""); err == nil {
 			fmt.Fprintf(os.Stderr, "AI: Using Vertex AI (ADC)\n")
-			handler = client.NewHandler(modelName)
+			handler = client.NewHandler(bareModel)
 		} else if apiKey != "" {
 			fmt.Fprintf(os.Stderr, "AI: Using Google AI Studio (GOOGLE_API_KEY)\n")
 			client := gemini.NewClient(apiKey)
-			handler = client.NewHandler(modelName)
+			handler = client.NewHandler(bareModel)
 		} else {
 			return fmt.Errorf("Gemini auth failed: Application Default Credentials (ADC) not configured, and GOOGLE_API_KEY is not set.\n"+
 				"  Option 1: gcloud auth application-default login  (recommended, for Vertex AI)\n"+
@@ -169,12 +195,20 @@ func setupAIHandlerDirect(effCtx *effects.EffContext, modelName string) error {
 		if err := client.CheckConnection(context.Background()); err != nil {
 			return err
 		}
-		// Strip ollama: prefix if present
-		model := strings.TrimPrefix(modelName, "ollama:")
+		// Strip ollama: prefix if present (bare model may still have it)
+		model := strings.TrimPrefix(bareModel, "ollama:")
 		handler = client.NewHandler(model)
 
+	case ai.ProviderOpenRouter:
+		apiKey := os.Getenv("OPENROUTER_API_KEY")
+		if apiKey == "" {
+			return fmt.Errorf("OPENROUTER_API_KEY environment variable required")
+		}
+		client := openai.NewClient(apiKey, openai.WithBaseURL("https://openrouter.ai/api/v1"))
+		handler = client.NewHandler(bareModel)
+
 	default:
-		return fmt.Errorf("cannot determine provider for model %s (use models.yml or prefix with claude-/gpt-/gemini-/ollama:)", modelName)
+		return fmt.Errorf("cannot determine provider for model %s (use models.yml or prefix with claude-/gpt-/gemini-/ollama:/openrouter:)", modelName)
 	}
 
 	effCtx.AI = effects.NewAIContext(handler)

@@ -30,11 +30,14 @@ type chatJSONSchema struct {
 
 // chatMessage represents a message in the Chat Completions API.
 type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	Reasoning string `json:"reasoning,omitempty"` // OpenRouter reasoning field (Qwen3, etc.)
 }
 
 // chatResponse represents the response from Chat Completions API.
+// The Error field captures provider-level errors that arrive with HTTP 200
+// (e.g. OpenRouter returns 200 + {"error":...,"choices":[]} on model errors).
 type chatResponse struct {
 	ID      string       `json:"id"`
 	Object  string       `json:"object"`
@@ -42,6 +45,10 @@ type chatResponse struct {
 	Model   string       `json:"model"`
 	Choices []chatChoice `json:"choices"`
 	Usage   chatUsage    `json:"usage"`
+	Error   *struct {
+		Message string `json:"message"`
+		Code    any    `json:"code"`
+	} `json:"error,omitempty"`
 }
 
 // chatChoice represents a completion choice.
