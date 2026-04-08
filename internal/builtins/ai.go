@@ -12,6 +12,9 @@ func init() {
 	registerAICallJsonSimple()
 	registerAICallImage()
 	registerAICallImageBase64()
+	registerAICallResult()
+	registerAICallJsonResult()
+	registerAICallJsonSimpleResult()
 }
 
 // _ai_call: Call the AI oracle with a string input
@@ -281,4 +284,134 @@ func aiCallImageBase64Impl(ctx *effects.EffContext, args []eval.Value) (eval.Val
 		return nil, err
 	}
 	return effects.Call(ctx, "AI", "callImageBase64", args)
+}
+
+// aiResultRecordType is the type for the structured AI result record.
+// {ok: bool, output: string, error_message: string, provider: string, status_code: int, retryable: bool, error_code: string}
+func aiResultRecordType() types.Type {
+	T := types.NewBuilder()
+	return T.Record(
+		types.Field("ok", T.Bool()),
+		types.Field("output", T.String()),
+		types.Field("error_message", T.String()),
+		types.Field("provider", T.String()),
+		types.Field("status_code", T.Int()),
+		types.Field("retryable", T.Bool()),
+		types.Field("error_code", T.String()),
+	)
+}
+
+func makeAICallResultType() types.Type {
+	T := types.NewBuilder()
+	return T.Func(T.String()).Returns(aiResultRecordType()).Effects("AI")
+}
+
+func makeAICallJsonResultType() types.Type {
+	T := types.NewBuilder()
+	return T.Func(T.String(), T.String()).Returns(aiResultRecordType()).Effects("AI")
+}
+
+func makeAICallJsonSimpleResultType() types.Type {
+	T := types.NewBuilder()
+	return T.Func(T.String()).Returns(aiResultRecordType()).Effects("AI")
+}
+
+// _ai_call_result: Call the AI oracle; return structured result record (never crashes on provider error)
+func registerAICallResult() {
+	err := RegisterEffectBuiltin(BuiltinSpec{
+		Module:  "std/ai",
+		Name:    "_ai_call_result",
+		NumArgs: 1,
+		Effect:  "AI",
+		Type:    makeAICallResultType,
+		Impl:    aiCallResultImpl,
+		Metadata: &BuiltinMetadata{
+			Description: "Call the AI oracle; returns a structured result record instead of crashing on provider errors",
+			Params: []ParamDoc{
+				{Name: "input", Description: "Input string"},
+			},
+			Returns:   "{ok, output, error_message, provider, status_code, retryable, error_code}",
+			Since:     "v0.9.0",
+			Stability: StabilityStable,
+			Tags:      []string{"ai", "error-handling"},
+			Category:  "ai",
+		},
+	})
+	if err != nil {
+		panic("failed to register _ai_call_result builtin: " + err.Error())
+	}
+}
+
+func aiCallResultImpl(ctx *effects.EffContext, args []eval.Value) (eval.Value, error) {
+	if err := ctx.RequireCapWithBudget("AI", ""); err != nil {
+		return nil, err
+	}
+	return effects.Call(ctx, "AI", "callResult", args)
+}
+
+// _ai_call_json_result: Call the AI oracle requesting JSON; return structured result record
+func registerAICallJsonResult() {
+	err := RegisterEffectBuiltin(BuiltinSpec{
+		Module:  "std/ai",
+		Name:    "_ai_call_json_result",
+		NumArgs: 2,
+		Effect:  "AI",
+		Type:    makeAICallJsonResultType,
+		Impl:    aiCallJsonResultImpl,
+		Metadata: &BuiltinMetadata{
+			Description: "Call the AI oracle for JSON output; returns structured result record",
+			Params: []ParamDoc{
+				{Name: "input", Description: "Input string"},
+				{Name: "schema", Description: "JSON Schema string"},
+			},
+			Returns:   "{ok, output, error_message, provider, status_code, retryable, error_code}",
+			Since:     "v0.9.0",
+			Stability: StabilityStable,
+			Tags:      []string{"ai", "json", "error-handling"},
+			Category:  "ai",
+		},
+	})
+	if err != nil {
+		panic("failed to register _ai_call_json_result builtin: " + err.Error())
+	}
+}
+
+func aiCallJsonResultImpl(ctx *effects.EffContext, args []eval.Value) (eval.Value, error) {
+	if err := ctx.RequireCapWithBudget("AI", ""); err != nil {
+		return nil, err
+	}
+	return effects.Call(ctx, "AI", "callJsonResult", args)
+}
+
+// _ai_call_json_simple_result: Call the AI oracle for JSON (no schema); return structured result record
+func registerAICallJsonSimpleResult() {
+	err := RegisterEffectBuiltin(BuiltinSpec{
+		Module:  "std/ai",
+		Name:    "_ai_call_json_simple_result",
+		NumArgs: 1,
+		Effect:  "AI",
+		Type:    makeAICallJsonSimpleResultType,
+		Impl:    aiCallJsonSimpleResultImpl,
+		Metadata: &BuiltinMetadata{
+			Description: "Call the AI oracle for valid JSON (no schema); returns structured result record",
+			Params: []ParamDoc{
+				{Name: "input", Description: "Input string"},
+			},
+			Returns:   "{ok, output, error_message, provider, status_code, retryable, error_code}",
+			Since:     "v0.9.0",
+			Stability: StabilityStable,
+			Tags:      []string{"ai", "json", "error-handling"},
+			Category:  "ai",
+		},
+	})
+	if err != nil {
+		panic("failed to register _ai_call_json_simple_result builtin: " + err.Error())
+	}
+}
+
+func aiCallJsonSimpleResultImpl(ctx *effects.EffContext, args []eval.Value) (eval.Value, error) {
+	if err := ctx.RequireCapWithBudget("AI", ""); err != nil {
+		return nil, err
+	}
+	return effects.Call(ctx, "AI", "callJsonSimpleResult", args)
 }

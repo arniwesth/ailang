@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/sunholo/ailang/internal/ai"
 	"github.com/sunholo/ailang/internal/eval"
 )
 
@@ -169,6 +171,141 @@ func init() {
 	RegisterOp("AI", "callJsonSimple", aiCallJsonSimple)
 	RegisterOp("AI", "callImage", aiCallImage)
 	RegisterOp("AI", "callImageBase64", aiCallImageBase64)
+	RegisterOp("AI", "callResult", aiCallResult)
+	RegisterOp("AI", "callJsonResult", aiCallJsonResult)
+	RegisterOp("AI", "callJsonSimpleResult", aiCallJsonSimpleResult)
+}
+
+// retryableStatuses is the set of HTTP status codes that warrant a retry.
+var retryableStatuses = map[int]bool{
+	408: true,
+	409: true,
+	425: true,
+	429: true,
+	500: true,
+	502: true,
+	503: true,
+	504: true,
+}
+
+// classifyAIError maps a Go error from an AI call into the structured result record fields.
+func classifyAIError(err error) (provider, errorCode, message string, statusCode int, retryable bool) {
+	var provErr *ai.ProviderError
+	if errors.As(err, &provErr) {
+		provider = provErr.Provider
+		statusCode = provErr.StatusCode
+		message = provErr.Error()
+		retryable = retryableStatuses[statusCode]
+		if statusCode > 0 {
+			errorCode = fmt.Sprintf("HTTP_%d", statusCode)
+		} else {
+			errorCode = "E_PROVIDER"
+		}
+		return
+	}
+	// Fallback: inspect error message for transport-level transients.
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "connection refused") {
+		retryable = true
+		errorCode = "E_TRANSPORT"
+	} else {
+		retryable = false
+		errorCode = "E_UNKNOWN"
+	}
+	message = err.Error()
+	return
+}
+
+// makeAIResultRecord builds the structured result record returned by callResult variants.
+// ok=true: output populated, error fields are zero-valued.
+// ok=false: error fields populated, output="".
+func makeAIResultRecord(ok bool, output string, err error) *eval.RecordValue {
+	if ok {
+		return &eval.RecordValue{Fields: map[string]eval.Value{
+			"ok":            &eval.BoolValue{Value: true},
+			"output":        &eval.StringValue{Value: output},
+			"error_message": &eval.StringValue{Value: ""},
+			"provider":      &eval.StringValue{Value: ""},
+			"status_code":   &eval.IntValue{Value: 0},
+			"retryable":     &eval.BoolValue{Value: false},
+			"error_code":    &eval.StringValue{Value: ""},
+		}}
+	}
+	provider, errorCode, message, statusCode, retryable := classifyAIError(err)
+	return &eval.RecordValue{Fields: map[string]eval.Value{
+		"ok":            &eval.BoolValue{Value: false},
+		"output":        &eval.StringValue{Value: ""},
+		"error_message": &eval.StringValue{Value: message},
+		"provider":      &eval.StringValue{Value: provider},
+		"status_code":   &eval.IntValue{Value: statusCode},
+		"retryable":     &eval.BoolValue{Value: retryable},
+		"error_code":    &eval.StringValue{Value: errorCode},
+	}}
+}
+
+// aiCallResult implements AI.callResult(input: string) -> {ok, output, error_message, ...}
+// Never returns a Go error for provider failures; only returns Go errors for programmer misuse.
+func aiCallResult(ctx *EffContext, args []eval.Value) (eval.Value, error) {
+	if len(args) < 1 {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: callResult: expected 1 argument, got %d", len(args))
+	}
+	input, ok := args[0].(*eval.StringValue)
+	if !ok {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: callResult: expected string input, got %T", args[0])
+	}
+	if ctx.AI == nil {
+		return makeAIResultRecord(false, "", ErrNoAIHandler), nil
+	}
+	output, err := ctx.AI.Call(input.Value)
+	if err != nil {
+		return makeAIResultRecord(false, "", err), nil
+	}
+	return makeAIResultRecord(true, output, nil), nil
+}
+
+// aiCallJsonResult implements AI.callJsonResult(input: string, schema: string) -> {ok, output, ...}
+func aiCallJsonResult(ctx *EffContext, args []eval.Value) (eval.Value, error) {
+	if len(args) < 2 {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: callJsonResult: expected 2 arguments, got %d", len(args))
+	}
+	input, ok := args[0].(*eval.StringValue)
+	if !ok {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: callJsonResult: expected string input, got %T", args[0])
+	}
+	schema, ok := args[1].(*eval.StringValue)
+	if !ok {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: callJsonResult: expected string schema, got %T", args[1])
+	}
+	if ctx.AI == nil {
+		return makeAIResultRecord(false, "", ErrNoAIHandler), nil
+	}
+	output, err := ctx.AI.CallJson(input.Value, schema.Value)
+	if err != nil {
+		return makeAIResultRecord(false, "", err), nil
+	}
+	return makeAIResultRecord(true, output, nil), nil
+}
+
+// aiCallJsonSimpleResult implements AI.callJsonSimpleResult(input: string) -> {ok, output, ...}
+func aiCallJsonSimpleResult(ctx *EffContext, args []eval.Value) (eval.Value, error) {
+	if len(args) < 1 {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: callJsonSimpleResult: expected 1 argument, got %d", len(args))
+	}
+	input, ok := args[0].(*eval.StringValue)
+	if !ok {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: callJsonSimpleResult: expected string input, got %T", args[0])
+	}
+	if ctx.AI == nil {
+		return makeAIResultRecord(false, "", ErrNoAIHandler), nil
+	}
+	output, err := ctx.AI.CallJson(input.Value, "")
+	if err != nil {
+		return makeAIResultRecord(false, "", err), nil
+	}
+	return makeAIResultRecord(true, output, nil), nil
 }
 
 // aiCall implements AI.call(input: string) -> string

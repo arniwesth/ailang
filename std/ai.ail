@@ -34,6 +34,8 @@
 
 module std/ai
 
+import std/result (Result, Ok, Err)
+
 -- call: Call the AI oracle with a string input
 -- Input is typically JSON-encoded context
 -- Output is typically JSON-encoded response
@@ -66,3 +68,61 @@ export func callImage(prompt: string, output_path: string, options: string) -> s
 -- Only requires AI capability (no file system access).
 export func callImageBase64(prompt: string, options: string) -> string ! {AI} =
   _ai_call_image_base64(prompt, options)
+
+-- AIError: structured error from a Result-based AI call.
+-- Fields:
+--   message    — human-readable error description
+--   provider   — provider name ("anthropic", "openai", "gemini", "" if unknown)
+--   statusCode — HTTP status code (0 if not applicable)
+--   retryable  — true if the caller should retry after a backoff
+--   code       — error code string ("HTTP_429", "E_TRANSPORT", "E_UNKNOWN", ...)
+export type AIError = {
+  message: string,
+  provider: string,
+  statusCode: int,
+  retryable: bool,
+  code: string
+}
+
+-- callResult: Call the AI oracle; returns Result[string, AIError] instead of crashing on errors.
+-- Use this in agents/loops where 429s and transient failures should be retried.
+export func callResult(input: string) -> Result[string, AIError] ! {AI} {
+  let r = _ai_call_result(input);
+  if r.ok
+  then Ok(r.output)
+  else Err({
+    message:    r.error_message,
+    provider:   r.provider,
+    statusCode: r.status_code,
+    retryable:  r.retryable,
+    code:       r.error_code
+  })
+}
+
+-- callJsonResult: Schema-enforced JSON call; returns Result[string, AIError].
+export func callJsonResult(input: string, schema: string) -> Result[string, AIError] ! {AI} {
+  let r = _ai_call_json_result(input, schema);
+  if r.ok
+  then Ok(r.output)
+  else Err({
+    message:    r.error_message,
+    provider:   r.provider,
+    statusCode: r.status_code,
+    retryable:  r.retryable,
+    code:       r.error_code
+  })
+}
+
+-- callJsonSimpleResult: JSON call (no schema); returns Result[string, AIError].
+export func callJsonSimpleResult(input: string) -> Result[string, AIError] ! {AI} {
+  let r = _ai_call_json_simple_result(input);
+  if r.ok
+  then Ok(r.output)
+  else Err({
+    message:    r.error_message,
+    provider:   r.provider,
+    statusCode: r.status_code,
+    retryable:  r.retryable,
+    code:       r.error_code
+  })
+}
