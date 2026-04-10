@@ -124,6 +124,47 @@ func (h *Handler) CallWithContext(ctx context.Context, input string) (string, er
 	return resp.Text, nil
 }
 
+// CallStream sends a request and emits typed stream deltas as they arrive.
+// If the provider does not implement StreamingProvider, this falls back to
+// a single-shot call and emits one synthetic delta with the full text.
+func (h *Handler) CallStream(input string, onEvent StreamHandler) (string, error) {
+	return h.CallStreamWithContext(context.Background(), input, onEvent)
+}
+
+// CallStreamWithContext is like CallStream but accepts a context.
+func (h *Handler) CallStreamWithContext(ctx context.Context, input string, onEvent StreamHandler) (string, error) {
+	req := &Request{
+		Model:        h.model,
+		SystemPrompt: h.systemPrompt,
+		UserPrompt:   input,
+		MaxTokens:    h.maxTokens,
+	}
+
+	if sp, ok := h.provider.(StreamingProvider); ok {
+		resp, err := sp.GenerateStream(ctx, req, onEvent)
+		if err != nil {
+			return "", err
+		}
+		return resp.Text, nil
+	}
+
+	// Compatibility fallback for non-streaming providers.
+	resp, err := h.provider.Generate(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	if onEvent != nil && resp.Text != "" {
+		if err := onEvent(StreamEvent{
+			Type:      StreamEventDelta,
+			Seq:       0,
+			TextDelta: resp.Text,
+		}); err != nil {
+			return "", err
+		}
+	}
+	return resp.Text, nil
+}
+
 // GenerateWithDetails returns the full response including token counts.
 // This is useful for eval harness and cost tracking.
 func (h *Handler) GenerateWithDetails(ctx context.Context, input string) (*Response, error) {

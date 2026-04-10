@@ -84,6 +84,26 @@ export type AIError = {
   code: string
 }
 
+-- AIStreamChunk: typed streamed text delta item.
+export type AIStreamChunk = {
+  seq: int,
+  text_delta: string
+}
+
+-- AIStreamResult: structured result for streaming calls.
+export type AIStreamResult = {
+  ok: bool,
+  output: string,
+  error_message: string,
+  provider: string,
+  status_code: int,
+  retryable: bool,
+  error_code: string,
+  chunks: [AIStreamChunk],
+  streamed: bool,
+  stream_truncated: bool
+}
+
 -- callResult: Call the AI oracle; returns Result[string, AIError] instead of crashing on errors.
 -- Use this in agents/loops where 429s and transient failures should be retried.
 export func callResult(input: string) -> Result[string, AIError] ! {AI} {
@@ -126,3 +146,9 @@ export func callJsonSimpleResult(input: string) -> Result[string, AIError] ! {AI
     code:       r.error_code
   })
 }
+
+-- callStreamResult: typed first-class streaming path.
+-- step/stream_id/model are runtime metadata used by hosts that render
+-- incremental stream events while preserving a typed return value.
+export func callStreamResult(input: string, step: int, stream_id: string, model: string) -> AIStreamResult ! {AI} =
+  _ai_call_stream_result(input, step, stream_id, model)

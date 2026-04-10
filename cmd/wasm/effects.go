@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"syscall/js"
 
+	"github.com/sunholo/ailang/internal/ai"
 	"github.com/sunholo/ailang/internal/effects"
 	"github.com/sunholo/ailang/internal/eval"
 )
@@ -110,6 +111,24 @@ func (h *WasmAIHandler) Call(input string) (string, error) {
 // WASM delegates to the same JS callback — structured output is not natively enforced.
 func (h *WasmAIHandler) CallJson(input string, schema string) (string, error) {
 	return h.Call(input)
+}
+
+// CallStream emits a single synthetic delta from the non-streaming JS callback.
+func (h *WasmAIHandler) CallStream(input string, onEvent ai.StreamHandler) (string, error) {
+	out, err := h.Call(input)
+	if err != nil {
+		return "", err
+	}
+	if onEvent != nil && out != "" {
+		if err := onEvent(ai.StreamEvent{
+			Type:      ai.StreamEventDelta,
+			Seq:       0,
+			TextDelta: out,
+		}); err != nil {
+			return "", err
+		}
+	}
+	return out, nil
 }
 
 // CallImage is not supported in WASM — image generation requires server-side file I/O.

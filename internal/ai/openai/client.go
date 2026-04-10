@@ -114,6 +114,21 @@ func (c *Client) Generate(ctx context.Context, req *ai.Request) (*ai.Response, e
 	return resp, nil
 }
 
+// GenerateStream implements ai.StreamingProvider.
+func (c *Client) GenerateStream(ctx context.Context, req *ai.Request, onEvent ai.StreamHandler) (*ai.Response, error) {
+	if ai.RequestsImage(req) {
+		return nil, ai.NewProviderError("openai", 0, "image generation not supported by provider \"openai\" (model: "+req.Model+") — use a Gemini image model", nil)
+	}
+	apiType := c.detectAPIType(req.Model)
+
+	switch apiType {
+	case APIResponses:
+		return c.generateResponsesStream(ctx, req, onEvent)
+	default:
+		return c.generateChatStream(ctx, req, onEvent)
+	}
+}
+
 // detectAPIType determines which API to use based on the model name.
 // Responses API is preferred for all modern models (GPT-5+, o-series).
 // Chat Completions is only used for legacy models (GPT-4 and earlier).

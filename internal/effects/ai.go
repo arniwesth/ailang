@@ -2,10 +2,13 @@ package effects
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/sunholo/ailang/internal/ai"
@@ -28,6 +31,9 @@ var ErrNoAIHandler = errors.New("no AI model configured — add --ai <model> fla
 // By convention, JSON is used for input/output, but this is not enforced.
 type AIHandler interface {
 	Call(input string) (string, error)
+	// CallStream emits typed stream events for user-visible text and returns
+	// the final merged output.
+	CallStream(input string, onEvent ai.StreamHandler) (string, error)
 	// CallJson sends a request configured for structured JSON output.
 	// If schema is non-empty, providers enforce the schema.
 	// Returns raw JSON string (caller parses to Json ADT).
@@ -66,6 +72,14 @@ func (c *AIContext) Call(input string) (string, error) {
 		return "", ErrNoAIHandler
 	}
 	return c.handler.Call(input)
+}
+
+// CallStream invokes the AI handler with typed stream events.
+func (c *AIContext) CallStream(input string, onEvent ai.StreamHandler) (string, error) {
+	if c.handler == nil {
+		return "", ErrNoAIHandler
+	}
+	return c.handler.CallStream(input, onEvent)
 }
 
 // CallJson invokes the AI handler requesting structured JSON output.
@@ -117,6 +131,24 @@ func (h *StubAIHandler) Call(input string) (string, error) {
 		return resp, nil
 	}
 	return h.defaultResponse, nil
+}
+
+// CallStream returns deterministic streamed output in a single chunk.
+func (h *StubAIHandler) CallStream(input string, onEvent ai.StreamHandler) (string, error) {
+	out, err := h.Call(input)
+	if err != nil {
+		return "", err
+	}
+	if onEvent != nil && out != "" {
+		if err := onEvent(ai.StreamEvent{
+			Type:      ai.StreamEventDelta,
+			Seq:       0,
+			TextDelta: out,
+		}); err != nil {
+			return "", err
+		}
+	}
+	return out, nil
 }
 
 // CallJson returns valid JSON for structured output requests.
@@ -174,6 +206,7 @@ func init() {
 	RegisterOp("AI", "callResult", aiCallResult)
 	RegisterOp("AI", "callJsonResult", aiCallJsonResult)
 	RegisterOp("AI", "callJsonSimpleResult", aiCallJsonSimpleResult)
+	RegisterOp("AI", "callStreamResult", aiCallStreamResult)
 }
 
 // retryableStatuses is the set of HTTP status codes that warrant a retry.
@@ -244,6 +277,289 @@ func makeAIResultRecord(ok bool, output string, err error) *eval.RecordValue {
 		"retryable":     &eval.BoolValue{Value: retryable},
 		"error_code":    &eval.StringValue{Value: errorCode},
 	}}
+}
+
+type streamChunk struct {
+	seq       int
+	textDelta string
+}
+
+func parseEnvInt(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func shouldEmitMotokoStreamEvents() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("MOTOKO_STREAM_EVENTS")))
+	return v == "1" || v == "true" || v == "yes"
+}
+
+func emitMotokoStreamEvent(ctx *EffContext, typ string, fields map[string]any) {
+	if !shouldEmitMotokoStreamEvents() {
+		return
+	}
+	out := map[string]any{"type": typ}
+	for k, v := range fields {
+		out[k] = v
+	}
+	payload, err := json.Marshal(out)
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintln(ctx.GetIOWriter(), string(payload))
+}
+
+func pollBufferedAbort(ctx *EffContext) bool {
+	reader := ctx.GetIOReader()
+	if reader == nil {
+		return false
+	}
+	for {
+		if reader.Buffered() == 0 {
+			return false
+		}
+		peek, _ := reader.Peek(reader.Buffered())
+		idx := -1
+		for i, b := range peek {
+			if b == '\n' {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			return false
+		}
+		line, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return false
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if err == io.EOF {
+				return false
+			}
+			continue
+		}
+		var raw map[string]any
+		if json.Unmarshal([]byte(line), &raw) != nil {
+			ctx.enqueueStdinLine(line)
+			if err == io.EOF {
+				return false
+			}
+			continue
+		}
+		t, _ := raw["type"].(string)
+		if t == "abort" {
+			return true
+		}
+		ctx.enqueueStdinLine(line)
+		if err == io.EOF {
+			return false
+		}
+	}
+}
+
+func chunksToEval(chunks []streamChunk) *eval.ListValue {
+	items := make([]eval.Value, 0, len(chunks))
+	for _, c := range chunks {
+		items = append(items, &eval.RecordValue{Fields: map[string]eval.Value{
+			"seq":        &eval.IntValue{Value: c.seq},
+			"text_delta": &eval.StringValue{Value: c.textDelta},
+		}})
+	}
+	return &eval.ListValue{Elements: items}
+}
+
+func makeAIStreamResultRecord(ok bool, output string, err error, chunks []streamChunk, streamed bool, truncated bool) *eval.RecordValue {
+	if ok {
+		return &eval.RecordValue{Fields: map[string]eval.Value{
+			"ok":               &eval.BoolValue{Value: true},
+			"output":           &eval.StringValue{Value: output},
+			"error_message":    &eval.StringValue{Value: ""},
+			"provider":         &eval.StringValue{Value: ""},
+			"status_code":      &eval.IntValue{Value: 0},
+			"retryable":        &eval.BoolValue{Value: false},
+			"error_code":       &eval.StringValue{Value: ""},
+			"chunks":           chunksToEval(chunks),
+			"streamed":         &eval.BoolValue{Value: streamed},
+			"stream_truncated": &eval.BoolValue{Value: truncated},
+		}}
+	}
+	provider, errorCode, message, statusCode, retryable := classifyAIError(err)
+	return &eval.RecordValue{Fields: map[string]eval.Value{
+		"ok":               &eval.BoolValue{Value: false},
+		"output":           &eval.StringValue{Value: output},
+		"error_message":    &eval.StringValue{Value: message},
+		"provider":         &eval.StringValue{Value: provider},
+		"status_code":      &eval.IntValue{Value: statusCode},
+		"retryable":        &eval.BoolValue{Value: retryable},
+		"error_code":       &eval.StringValue{Value: errorCode},
+		"chunks":           chunksToEval(chunks),
+		"streamed":         &eval.BoolValue{Value: streamed},
+		"stream_truncated": &eval.BoolValue{Value: truncated},
+	}}
+}
+
+// aiCallStreamResult implements:
+// AI.callStreamResult(input: string, step: int, stream_id: string, model: string)
+// -> {ok, output, error_*, chunks, streamed, stream_truncated}
+func aiCallStreamResult(ctx *EffContext, args []eval.Value) (eval.Value, error) {
+	if len(args) < 4 {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: callStreamResult: expected 4 arguments, got %d", len(args))
+	}
+	input, ok := args[0].(*eval.StringValue)
+	if !ok {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: callStreamResult: expected string input, got %T", args[0])
+	}
+	step, ok := args[1].(*eval.IntValue)
+	if !ok {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: callStreamResult: expected int step, got %T", args[1])
+	}
+	streamID, ok := args[2].(*eval.StringValue)
+	if !ok {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: callStreamResult: expected string stream_id, got %T", args[2])
+	}
+	model, ok := args[3].(*eval.StringValue)
+	if !ok {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: callStreamResult: expected string model, got %T", args[3])
+	}
+	if ctx.AI == nil {
+		return makeAIStreamResultRecord(false, "", ErrNoAIHandler, nil, false, false), nil
+	}
+
+	maxChunks := parseEnvInt("AI_STREAM_MAX_CHUNKS", 4000)
+	maxBytes := parseEnvInt("AI_STREAM_MAX_BYTES", 2*1024*1024)
+	if maxChunks <= 0 {
+		maxChunks = 4000
+	}
+	if maxBytes <= 0 {
+		maxBytes = 2 * 1024 * 1024
+	}
+
+	chunks := make([]streamChunk, 0, 128)
+	var outputBuilder strings.Builder
+	seq := 0
+	truncated := false
+	emittedBytes := 0
+	aborted := false
+
+	emitMotokoStreamEvent(ctx, "thinking_stream_start", map[string]any{
+		"step":      step.Value,
+		"stream_id": streamID.Value,
+		"model":     model.Value,
+	})
+	if ctx.Trace != nil && ctx.Trace.Enabled() {
+		ctx.Trace.RecordEffect("AI", "stream_start", []string{
+			fmt.Sprintf("step=%d", step.Value),
+			"stream_id=" + streamID.Value,
+			"model=" + model.Value,
+		}, "ok")
+	}
+
+	output, err := ctx.AI.CallStream(input.Value, func(ev ai.StreamEvent) error {
+		if pollBufferedAbort(ctx) {
+			aborted = true
+			return fmt.Errorf("stream aborted by user")
+		}
+		if ev.Type != ai.StreamEventDelta || ev.TextDelta == "" {
+			return nil
+		}
+		if len(chunks) >= maxChunks || emittedBytes+len(ev.TextDelta) > maxBytes {
+			if !truncated {
+				truncated = true
+				if ctx.Trace != nil && ctx.Trace.Enabled() {
+					ctx.Trace.RecordEffect("AI", "stream_truncated", []string{
+						fmt.Sprintf("max_chunks=%d", maxChunks),
+						fmt.Sprintf("max_bytes=%d", maxBytes),
+					}, "true")
+				}
+			}
+			return nil
+		}
+
+		chunk := streamChunk{seq: seq, textDelta: ev.TextDelta}
+		chunks = append(chunks, chunk)
+		outputBuilder.WriteString(ev.TextDelta)
+		emittedBytes += len(ev.TextDelta)
+
+		emitMotokoStreamEvent(ctx, "thinking_delta", map[string]any{
+			"step":       step.Value,
+			"stream_id":  streamID.Value,
+			"seq":        seq,
+			"text_delta": ev.TextDelta,
+		})
+		if ctx.Trace != nil && ctx.Trace.Enabled() {
+			ctx.Trace.RecordEffect("AI", "stream_delta", []string{
+				fmt.Sprintf("seq=%d", seq),
+				fmt.Sprintf("bytes=%d", len(ev.TextDelta)),
+			}, ev.TextDelta)
+		}
+		seq++
+		return nil
+	})
+
+	if err != nil {
+		if aborted {
+			emitMotokoStreamEvent(ctx, "thinking_stream_end", map[string]any{
+				"step":      step.Value,
+				"stream_id": streamID.Value,
+				"status":    "aborted",
+			})
+			if ctx.Trace != nil && ctx.Trace.Enabled() {
+				ctx.Trace.RecordEffect("AI", "stream_end", []string{
+					"stream_id=" + streamID.Value,
+					"status=aborted",
+				}, "")
+			}
+			return makeAIStreamResultRecord(false, outputBuilder.String(), err, chunks, true, truncated), nil
+		}
+		_, _, message, _, retryable := classifyAIError(err)
+		emitMotokoStreamEvent(ctx, "thinking_stream_error", map[string]any{
+			"step":      step.Value,
+			"stream_id": streamID.Value,
+			"message":   message,
+			"retryable": retryable,
+		})
+		emitMotokoStreamEvent(ctx, "thinking_stream_end", map[string]any{
+			"step":      step.Value,
+			"stream_id": streamID.Value,
+			"status":    "errored",
+		})
+		if ctx.Trace != nil && ctx.Trace.Enabled() {
+			ctx.Trace.RecordEffect("AI", "stream_error", []string{
+				"stream_id=" + streamID.Value,
+			}, message)
+			ctx.Trace.RecordEffect("AI", "stream_end", []string{
+				"stream_id=" + streamID.Value,
+				"status=errored",
+			}, "")
+		}
+		return makeAIStreamResultRecord(false, outputBuilder.String(), err, chunks, true, truncated), nil
+	}
+
+	finalOutput := output
+	if finalOutput == "" {
+		finalOutput = outputBuilder.String()
+	}
+	emitMotokoStreamEvent(ctx, "thinking_stream_end", map[string]any{
+		"step":      step.Value,
+		"stream_id": streamID.Value,
+		"status":    "completed",
+	})
+	if ctx.Trace != nil && ctx.Trace.Enabled() {
+		ctx.Trace.RecordEffect("AI", "stream_end", []string{
+			"stream_id=" + streamID.Value,
+			"status=completed",
+		}, "")
+	}
+	return makeAIStreamResultRecord(true, finalOutput, nil, chunks, true, truncated), nil
 }
 
 // aiCallResult implements AI.callResult(input: string) -> {ok, output, error_message, ...}

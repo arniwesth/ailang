@@ -110,6 +110,30 @@ type Provider interface {
 	Name() string
 }
 
+// StreamEventType is the typed kind of a streaming event emitted by providers.
+type StreamEventType string
+
+const (
+	// StreamEventDelta carries user-visible assistant text.
+	StreamEventDelta StreamEventType = "delta"
+)
+
+// StreamEvent is a typed streaming chunk emitted during generation.
+type StreamEvent struct {
+	Type      StreamEventType
+	Seq       int
+	TextDelta string
+}
+
+// StreamHandler receives stream events in order.
+type StreamHandler func(StreamEvent) error
+
+// StreamingProvider is an optional extension implemented by providers that
+// support incremental token streaming.
+type StreamingProvider interface {
+	GenerateStream(ctx context.Context, req *Request, onEvent StreamHandler) (*Response, error)
+}
+
 // ProviderError represents an error from an AI provider.
 type ProviderError struct {
 	Provider   string // Provider name

@@ -227,6 +227,42 @@ func TestIOReadLine_WrongArgCount(t *testing.T) {
 	}
 }
 
+func TestIOReadLine_UsesQueuedLineBeforeReader(t *testing.T) {
+	ctx := NewEffContext([]string{})
+	ctx.Grant(NewCapability("IO"))
+	ctx.enqueueStdinLine(`{"type":"model_change","model":"gpt-5.4"}`)
+
+	result, err := ioReadLine(ctx, []eval.Value{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	strVal, ok := result.(*eval.StringValue)
+	if !ok {
+		t.Fatalf("expected StringValue, got %T", result)
+	}
+	if strVal.Value != `{"type":"model_change","model":"gpt-5.4"}` {
+		t.Fatalf("unexpected queued line: %q", strVal.Value)
+	}
+}
+
+func TestIOPollStdin_UsesQueuedLineBeforeReader(t *testing.T) {
+	ctx := NewEffContext([]string{})
+	ctx.Grant(NewCapability("IO"))
+	ctx.enqueueStdinLine(`{"type":"user_message","content":"hi"}`)
+
+	result, err := ioPollStdin(ctx, []eval.Value{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	strVal, ok := result.(*eval.StringValue)
+	if !ok {
+		t.Fatalf("expected StringValue, got %T", result)
+	}
+	if strVal.Value != `{"type":"user_message","content":"hi"}` {
+		t.Fatalf("unexpected queued line: %q", strVal.Value)
+	}
+}
+
 func TestCall_UnknownEffect(t *testing.T) {
 	ctx := NewEffContext([]string{})
 	ctx.Grant(NewCapability("Unknown"))

@@ -15,6 +15,7 @@ func init() {
 	registerAICallResult()
 	registerAICallJsonResult()
 	registerAICallJsonSimpleResult()
+	registerAICallStreamResult()
 }
 
 // _ai_call: Call the AI oracle with a string input
@@ -301,6 +302,30 @@ func aiResultRecordType() types.Type {
 	)
 }
 
+func aiStreamChunkType() types.Type {
+	T := types.NewBuilder()
+	return T.Record(
+		types.Field("seq", T.Int()),
+		types.Field("text_delta", T.String()),
+	)
+}
+
+func aiStreamResultRecordType() types.Type {
+	T := types.NewBuilder()
+	return T.Record(
+		types.Field("ok", T.Bool()),
+		types.Field("output", T.String()),
+		types.Field("error_message", T.String()),
+		types.Field("provider", T.String()),
+		types.Field("status_code", T.Int()),
+		types.Field("retryable", T.Bool()),
+		types.Field("error_code", T.String()),
+		types.Field("chunks", T.List(aiStreamChunkType())),
+		types.Field("streamed", T.Bool()),
+		types.Field("stream_truncated", T.Bool()),
+	)
+}
+
 func makeAICallResultType() types.Type {
 	T := types.NewBuilder()
 	return T.Func(T.String()).Returns(aiResultRecordType()).Effects("AI")
@@ -414,4 +439,44 @@ func aiCallJsonSimpleResultImpl(ctx *effects.EffContext, args []eval.Value) (eva
 		return nil, err
 	}
 	return effects.Call(ctx, "AI", "callJsonSimpleResult", args)
+}
+
+func makeAICallStreamResultType() types.Type {
+	T := types.NewBuilder()
+	return T.Func(T.String(), T.Int(), T.String(), T.String()).Returns(aiStreamResultRecordType()).Effects("AI")
+}
+
+func registerAICallStreamResult() {
+	err := RegisterEffectBuiltin(BuiltinSpec{
+		Module:  "std/ai",
+		Name:    "_ai_call_stream_result",
+		NumArgs: 4,
+		Effect:  "AI",
+		Type:    makeAICallStreamResultType,
+		Impl:    aiCallStreamResultImpl,
+		Metadata: &BuiltinMetadata{
+			Description: "Call AI with typed streaming chunks and structured final result",
+			Params: []ParamDoc{
+				{Name: "input", Description: "Input string"},
+				{Name: "step", Description: "Runtime step index"},
+				{Name: "stream_id", Description: "Caller-generated stream id"},
+				{Name: "model", Description: "Model label for stream metadata"},
+			},
+			Returns:   "{ok, output, error_*, chunks, streamed, stream_truncated}",
+			Since:     "v0.10.1",
+			Stability: StabilityExperimental,
+			Tags:      []string{"ai", "streaming", "error-handling"},
+			Category:  "ai",
+		},
+	})
+	if err != nil {
+		panic("failed to register _ai_call_stream_result builtin: " + err.Error())
+	}
+}
+
+func aiCallStreamResultImpl(ctx *effects.EffContext, args []eval.Value) (eval.Value, error) {
+	if err := ctx.RequireCapWithBudget("AI", ""); err != nil {
+		return nil, err
+	}
+	return effects.Call(ctx, "AI", "callStreamResult", args)
 }

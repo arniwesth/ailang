@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/sunholo/ailang/internal/ai"
@@ -371,6 +372,82 @@ func TestClient_Generate_ChatCompletions_WithSeed(t *testing.T) {
 
 	if receivedSeed == nil || *receivedSeed != 42 {
 		t.Errorf("Seed not passed correctly, got %v", receivedSeed)
+	}
+}
+
+func TestClient_GenerateStream_ChatCompletions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("Path = %s, want /chat/completions", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"model":"gpt-4-turbo","choices":[{"index":0,"delta":{"content":"Hel"},"finish_reason":""}]}`,
+			"",
+			`data: {"model":"gpt-4-turbo","choices":[{"index":0,"delta":{"content":"lo"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`,
+			"",
+			`data: [DONE]`,
+			"",
+		}, "\n")))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", WithBaseURL(server.URL), WithAPIType(APIChatCompletions))
+	var deltas []string
+	resp, err := client.GenerateStream(context.Background(), &ai.Request{
+		Model:      "gpt-4-turbo",
+		UserPrompt: "hello",
+	}, func(ev ai.StreamEvent) error {
+		deltas = append(deltas, ev.TextDelta)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("GenerateStream() error = %v", err)
+	}
+	if resp.Text != "Hello" {
+		t.Fatalf("Text = %q, want %q", resp.Text, "Hello")
+	}
+	if len(deltas) != 2 || deltas[0] != "Hel" || deltas[1] != "lo" {
+		t.Fatalf("deltas = %#v, want [\"Hel\", \"lo\"]", deltas)
+	}
+}
+
+func TestClient_GenerateStream_Responses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("Path = %s, want /responses", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"type":"response.output_text.delta","delta":"Hi "}`,
+			"",
+			`data: {"type":"response.output_text.delta","delta":"there"}`,
+			"",
+			`data: {"type":"response.completed","response":{"model":"gpt-5-mini","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hi there"}]}],"usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}}`,
+			"",
+			`data: [DONE]`,
+			"",
+		}, "\n")))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", WithBaseURL(server.URL), WithAPIType(APIResponses))
+	var deltas []string
+	resp, err := client.GenerateStream(context.Background(), &ai.Request{
+		Model:      "gpt-5-mini",
+		UserPrompt: "hello",
+	}, func(ev ai.StreamEvent) error {
+		deltas = append(deltas, ev.TextDelta)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("GenerateStream() error = %v", err)
+	}
+	if resp.Text != "Hi there" {
+		t.Fatalf("Text = %q, want %q", resp.Text, "Hi there")
+	}
+	if len(deltas) != 2 || deltas[0] != "Hi " || deltas[1] != "there" {
+		t.Fatalf("deltas = %#v, want [\"Hi \", \"there\"]", deltas)
 	}
 }
 

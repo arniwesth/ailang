@@ -42,6 +42,7 @@ type EffContext struct {
 	IOWriter       io.Writer             // Override for IO effect output (nil = os.Stdout)
 	IOReader       io.Reader             // Override for IO effect input (nil = os.Stdin)
 	stdinReader    *bufio.Reader         // Persistent buffered reader for readLine (lazily initialized)
+	stdinQueue     *stdinLineQueue       // Buffered stdin lines consumed out-of-band and replayed to IO.readLine/pollStdin
 
 	// M-DX25: Scoped budget charging
 	DeclaredBudgets map[string]int // Callee's declared @limit values (for charging caller on return)
@@ -62,7 +63,7 @@ type EffContext struct {
 	SpanWrapper SpanWrapperFunc
 }
 
-// SpanWrapperFunc wraps an effect operation with an OTEL span.
+	// SpanWrapperFunc wraps an effect operation with an OTEL span.
 // Called by Call() if non-nil. The wrapper starts a span, calls fn(),
 // sets span attributes/status, and ends the span.
 // Defined here (in effects) so telemetry can implement it without import cycles.
@@ -72,6 +73,10 @@ type SpanWrapperFunc func(
 	args []eval.Value,
 	fn func() (eval.Value, error),
 ) (eval.Value, error)
+
+type stdinLineQueue struct {
+	lines []string
+}
 
 // EffEnv provides deterministic effect execution configuration
 //
@@ -343,16 +348,41 @@ func (ctx *EffContext) WithBudget(budget *BudgetContext) *EffContext {
 		EnvAllowlist:    ctx.EnvAllowlist,
 		Args:            ctx.Args,
 		Trace:           ctx.Trace,       // Preserve trace collector across budget scopes (M-TRACE-EXPORT)
-		IOWriter:        ctx.IOWriter,    // Preserve IO writer across budget scopes
-		IOReader:        ctx.IOReader,    // Preserve IO reader across budget scopes
-		stdinReader:     ctx.stdinReader, // Share persistent buffered reader across scopes
-		DeclaredBudgets: nil,             // Reset for new scope (will be set by WithBudgetLimits)
+			IOWriter:        ctx.IOWriter,    // Preserve IO writer across budget scopes
+			IOReader:        ctx.IOReader,    // Preserve IO reader across budget scopes
+			stdinReader:     ctx.stdinReader, // Share persistent buffered reader across scopes
+			stdinQueue:      ctx.stdinQueue,  // Share buffered stdin replay queue across scopes
+			DeclaredBudgets: nil,             // Reset for new scope (will be set by WithBudgetLimits)
 		CallerContext:   nil,             // Reset for new scope (will be set by WithBudgetLimits)
 		FnCaller:        ctx.FnCaller,    // Preserve function caller across budget scopes (M-STREAM-BIDI)
 		FnCallerN:       ctx.FnCallerN,   // Preserve multi-arg function caller across budget scopes (M-ITERATIVE-LIST)
 		GoCtx:           ctx.GoCtx,       // Preserve OTEL trace context across budget scopes
 		SpanWrapper:     ctx.SpanWrapper, // Preserve OTEL span wrapper across budget scopes
 	}
+}
+
+func (ctx *EffContext) ensureStdinQueue() *stdinLineQueue {
+	if ctx.stdinQueue == nil {
+		ctx.stdinQueue = &stdinLineQueue{lines: nil}
+	}
+	return ctx.stdinQueue
+}
+
+func (ctx *EffContext) enqueueStdinLine(line string) {
+	if line == "" {
+		return
+	}
+	q := ctx.ensureStdinQueue()
+	q.lines = append(q.lines, line)
+}
+
+func (ctx *EffContext) dequeueStdinLine() (string, bool) {
+	if ctx.stdinQueue == nil || len(ctx.stdinQueue.lines) == 0 {
+		return "", false
+	}
+	line := ctx.stdinQueue.lines[0]
+	ctx.stdinQueue.lines = ctx.stdinQueue.lines[1:]
+	return line, true
 }
 
 // WithBudgetLimits creates a new context with budget limits from a map[string]int

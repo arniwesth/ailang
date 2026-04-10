@@ -13,6 +13,12 @@ type chatRequest struct {
 	Temperature         float64             `json:"temperature,omitempty"`
 	Seed                *int64              `json:"seed,omitempty"`
 	ResponseFormat      *chatResponseFormat `json:"response_format,omitempty"` // Structured output
+	Stream              bool                `json:"stream,omitempty"`
+	StreamOptions       *chatStreamOptions  `json:"stream_options,omitempty"`
+}
+
+type chatStreamOptions struct {
+	IncludeUsage bool `json:"include_usage,omitempty"`
 }
 
 // chatResponseFormat configures structured output for Chat Completions API.
@@ -99,6 +105,7 @@ type responsesRequest struct {
 	Reasoning *responsesReasoning `json:"reasoning,omitempty"`
 	MaxTokens int                 `json:"max_output_tokens,omitempty"`
 	Text      *responsesText      `json:"text,omitempty"` // Structured output config
+	Stream    bool                `json:"stream,omitempty"`
 }
 
 // responsesText configures structured output for Responses API.
@@ -169,6 +176,44 @@ type responsesUsage struct {
 	OutputDetails struct {
 		ReasoningTokens int `json:"reasoning_tokens"`
 	} `json:"output_tokens_details,omitempty"`
+}
+
+// =====================================================================
+// Streaming payload types (SSE)
+// =====================================================================
+
+type chatStreamChunk struct {
+	Model   string        `json:"model"`
+	Choices []chatChoiceS `json:"choices"`
+	Usage   chatUsage     `json:"usage,omitempty"`
+	Error   *struct {
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+type chatChoiceS struct {
+	Index        int             `json:"index"`
+	Delta        chatDeltaStream `json:"delta"`
+	FinishReason string          `json:"finish_reason"`
+}
+
+type chatDeltaStream struct {
+	Content any `json:"content"`
+}
+
+type responsesStreamEvent struct {
+	Type     string           `json:"type"`
+	Delta    string           `json:"delta,omitempty"`
+	Response *responsesStream `json:"response,omitempty"`
+	Error    *struct {
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+type responsesStream struct {
+	Model  string                `json:"model"`
+	Output []responsesOutputItem `json:"output"`
+	Usage  responsesUsage        `json:"usage"`
 }
 
 // ensureStrictSchemaCompliance makes a JSON Schema compatible with OpenAI's strict

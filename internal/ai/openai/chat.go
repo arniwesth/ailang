@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -151,4 +152,173 @@ func (c *Client) generateChat(ctx context.Context, req *ai.Request) (*ai.Respons
 		ReasonTokens: reasoningTokens,
 		Model:        result.Model,
 	}, nil
+}
+
+// generateChatStream uses Chat Completions SSE streaming.
+func (c *Client) generateChatStream(ctx context.Context, req *ai.Request, onEvent ai.StreamHandler) (*ai.Response, error) {
+	var messages []chatMessage
+	if req.SystemPrompt != "" {
+		messages = append(messages, chatMessage{
+			Role:    "system",
+			Content: req.SystemPrompt,
+		})
+	}
+	messages = append(messages, chatMessage{
+		Role:    "user",
+		Content: req.UserPrompt,
+	})
+
+	apiReq := chatRequest{
+		Model:         req.Model,
+		Messages:      messages,
+		Stream:        true,
+		StreamOptions: &chatStreamOptions{IncludeUsage: true},
+	}
+
+	maxTokens := req.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 4096
+	}
+	if usesMaxCompletionTokens(req.Model) {
+		apiReq.MaxCompletionTokens = maxTokens
+	} else {
+		apiReq.MaxTokens = maxTokens
+	}
+	if req.Temperature > 0 {
+		apiReq.Temperature = req.Temperature
+	}
+	if req.Options != nil {
+		if seed, ok := req.Options["seed"].(int64); ok {
+			apiReq.Seed = &seed
+		}
+	}
+	if req.ResponseFormat == "json" {
+		if req.ResponseSchema != "" {
+			schema := ensureStrictSchemaCompliance(json.RawMessage(req.ResponseSchema))
+			apiReq.ResponseFormat = &chatResponseFormat{
+				Type: "json_schema",
+				JSONSchema: &chatJSONSchema{
+					Name:   "response",
+					Schema: schema,
+					Strict: true,
+				},
+			}
+		} else {
+			apiReq.ResponseFormat = &chatResponseFormat{Type: "json_object"}
+		}
+	}
+
+	jsonBody, err := json.Marshal(apiReq)
+	if err != nil {
+		return nil, ai.NewProviderError("openai", 0, "failed to marshal request", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/chat/completions", bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, ai.NewProviderError("openai", 0, "failed to create request", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+	if strings.TrimSpace(c.apiKey) != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, ai.NewProviderError("openai", 0, "request failed", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		var errResp errorResponse
+		if json.Unmarshal(body, &errResp) == nil && errResp.Error.Message != "" {
+			return nil, ai.NewProviderError("openai", resp.StatusCode, errResp.Error.Message, nil)
+		}
+		return nil, ai.NewProviderError("openai", resp.StatusCode, string(body), nil)
+	}
+
+	var textBuilder strings.Builder
+	seq := 0
+	modelName := req.Model
+	var usage chatUsage
+
+	err = readSSEData(resp.Body, func(payload string) error {
+		var chunk chatStreamChunk
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			return fmt.Errorf("invalid chat stream chunk: %w", err)
+		}
+		if chunk.Error != nil && chunk.Error.Message != "" {
+			return ai.NewProviderError("openai", 0, chunk.Error.Message, nil)
+		}
+		if chunk.Model != "" {
+			modelName = chunk.Model
+		}
+		if chunk.Usage.TotalTokens > 0 {
+			usage = chunk.Usage
+		}
+
+		for _, choice := range chunk.Choices {
+			delta := extractChatStreamText(choice.Delta.Content)
+			if delta == "" {
+				continue
+			}
+			textBuilder.WriteString(delta)
+			if onEvent != nil {
+				if err := onEvent(ai.StreamEvent{
+					Type:      ai.StreamEventDelta,
+					Seq:       seq,
+					TextDelta: delta,
+				}); err != nil {
+					return err
+				}
+			}
+			seq++
+		}
+		return nil
+	})
+	if err != nil {
+		if pe, ok := err.(*ai.ProviderError); ok {
+			return nil, pe
+		}
+		return nil, ai.NewProviderError("openai", 0, "stream parse failed", err)
+	}
+
+	outputTokens := usage.CompletionTokens
+	reasoningTokens := usage.CompletionTokensDetails.ReasoningTokens
+	if reasoningTokens > 0 {
+		outputTokens = outputTokens - reasoningTokens
+	}
+
+	return &ai.Response{
+		Text:         textBuilder.String(),
+		InputTokens:  usage.PromptTokens,
+		OutputTokens: outputTokens,
+		TotalTokens:  usage.TotalTokens,
+		ReasonTokens: reasoningTokens,
+		Model:        modelName,
+	}, nil
+}
+
+func extractChatStreamText(content any) string {
+	switch v := content.(type) {
+	case string:
+		return v
+	case []any:
+		var out strings.Builder
+		for _, item := range v {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			kind, _ := m["type"].(string)
+			if kind != "text" && kind != "output_text" {
+				continue
+			}
+			text, _ := m["text"].(string)
+			out.WriteString(text)
+		}
+		return out.String()
+	default:
+		return ""
+	}
 }

@@ -2,6 +2,7 @@ package effects
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sunholo/ailang/internal/eval"
@@ -134,5 +135,22 @@ func TestAI_NoContext(t *testing.T) {
 
 	if !errors.Is(err, ErrNoAIHandler) {
 		t.Errorf("expected ErrNoAIHandler, got %v", err)
+	}
+}
+
+func TestPollBufferedAbort_PreservesNonAbortLines(t *testing.T) {
+	ctx := NewEffContext(nil)
+	ctx.IOReader = strings.NewReader("{\"type\":\"model_change\",\"model\":\"gpt-5.4\"}\n{\"type\":\"abort\"}\n")
+	_, _ = ctx.GetIOReader().Peek(1) // prime buffer for non-blocking buffered poll path
+
+	if !pollBufferedAbort(ctx) {
+		t.Fatal("expected abort to be detected")
+	}
+	line, ok := ctx.dequeueStdinLine()
+	if !ok {
+		t.Fatal("expected queued non-abort line")
+	}
+	if line != "{\"type\":\"model_change\",\"model\":\"gpt-5.4\"}" {
+		t.Fatalf("unexpected queued line: %q", line)
 	}
 }

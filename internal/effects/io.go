@@ -97,6 +97,9 @@ func ioReadLine(ctx *EffContext, args []eval.Value) (eval.Value, error) {
 	if len(args) != 0 {
 		return nil, fmt.Errorf("readLine: expected 0 arguments, got %d", len(args))
 	}
+	if line, ok := ctx.dequeueStdinLine(); ok {
+		return &eval.StringValue{Value: line}, nil
+	}
 
 	reader := ctx.GetIOReader()
 	line, err := reader.ReadString('\n')
@@ -141,6 +144,9 @@ func ioReadLine(ctx *EffContext, args []eval.Value) (eval.Value, error) {
 func ioPollStdin(ctx *EffContext, args []eval.Value) (eval.Value, error) {
 	if len(args) != 0 {
 		return nil, fmt.Errorf("pollStdin: expected 0 arguments, got %d", len(args))
+	}
+	if line, ok := ctx.dequeueStdinLine(); ok {
+		return &eval.StringValue{Value: line}, nil
 	}
 
 	reader := ctx.GetIOReader()
