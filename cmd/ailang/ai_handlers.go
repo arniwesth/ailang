@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -20,6 +21,71 @@ import (
 	"github.com/sunholo/ailang/internal/effects"
 	"github.com/sunholo/ailang/internal/eval_harness"
 )
+
+const defaultOpenAIBaseURL = "https://api.openai.com/v1"
+
+// normalizeOpenAIBaseURL normalizes an OpenAI-compatible endpoint URL.
+// Rules:
+//   - Trim whitespace
+//   - Require http/https scheme
+//   - Strip trailing slash
+//   - Append /v1 when missing
+func normalizeOpenAIBaseURL(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", fmt.Errorf("empty URL")
+	}
+
+	u, err := url.Parse(s)
+	if err != nil {
+		return "", fmt.Errorf("parse URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("URL must start with http:// or https://")
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("URL must include host")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("URL must not contain query parameters or fragments")
+	}
+
+	path := strings.TrimRight(u.Path, "/")
+	if path == "" {
+		path = "/v1"
+	} else if !strings.HasSuffix(path, "/v1") {
+		path += "/v1"
+	}
+	u.Path = path
+
+	return u.String(), nil
+}
+
+// resolveOpenAIBaseURLFromEnv returns the effective OpenAI base URL and whether
+// it is a custom endpoint (non-default).
+func resolveOpenAIBaseURLFromEnv() (baseURL string, isCustom bool, err error) {
+	raw := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+	if raw == "" {
+		return defaultOpenAIBaseURL, false, nil
+	}
+
+	normalized, err := normalizeOpenAIBaseURL(raw)
+	if err != nil {
+		return "", false, fmt.Errorf("invalid OPENAI_BASE_URL: %w", err)
+	}
+	return normalized, normalized != defaultOpenAIBaseURL, nil
+}
+
+func newOpenAIClient(apiKey string) (*openai.Client, bool, error) {
+	baseURL, isCustom, err := resolveOpenAIBaseURLFromEnv()
+	if err != nil {
+		return nil, false, err
+	}
+	if baseURL == defaultOpenAIBaseURL {
+		return openai.NewClient(apiKey), isCustom, nil
+	}
+	return openai.NewClient(apiKey, openai.WithBaseURL(baseURL)), isCustom, nil
+}
 
 // setupAIHandler configures the AI effect handler based on CLI flags.
 // Uses the unified internal/ai package for all providers.
@@ -73,10 +139,13 @@ func setupAIHandler(effCtx *effects.EffContext, aiStub bool, aiModel string) err
 		handler = client.NewHandler(model.APIName, opts...)
 
 	case ai.ProviderOpenAI:
-		if apiKey == "" {
+		client, isCustomBaseURL, err := newOpenAIClient(apiKey)
+		if err != nil {
+			return err
+		}
+		if apiKey == "" && !isCustomBaseURL {
 			return fmt.Errorf("%s environment variable required for model %s", model.EnvVar, aiModel)
 		}
-		client := openai.NewClient(apiKey)
 		handler = client.NewHandler(model.APIName, opts...)
 
 	case ai.ProviderGoogle:
@@ -162,10 +231,13 @@ func setupAIHandlerDirect(effCtx *effects.EffContext, modelName string) error {
 
 	case ai.ProviderOpenAI:
 		apiKey := os.Getenv("OPENAI_API_KEY")
-		if apiKey == "" {
+		client, isCustomBaseURL, err := newOpenAIClient(apiKey)
+		if err != nil {
+			return err
+		}
+		if apiKey == "" && !isCustomBaseURL {
 			return fmt.Errorf("OPENAI_API_KEY environment variable required")
 		}
-		client := openai.NewClient(apiKey)
 		handler = client.NewHandler(bareModel)
 
 	case ai.ProviderGoogle:

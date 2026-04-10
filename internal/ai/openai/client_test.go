@@ -681,3 +681,51 @@ func TestClient_Generate_ResponsesAPI_Error(t *testing.T) {
 		t.Errorf("Message = %q, want %q", providerErr.Message, "Invalid model")
 	}
 }
+
+func TestClient_Generate_ChatCompletions_OmitsAuthHeaderWhenAPIKeyEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("Authorization = %q, want empty", got)
+		}
+		resp := chatResponse{
+			Choices: []chatChoice{
+				{Message: chatMessage{Content: "ok"}},
+			},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient("", WithBaseURL(server.URL), WithAPIType(APIChatCompletions))
+	_, err := client.Generate(context.Background(), &ai.Request{
+		Model:      "gpt-4",
+		UserPrompt: "test",
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+}
+
+func TestClient_Generate_ResponsesAPI_OmitsAuthHeaderWhenAPIKeyEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("Authorization = %q, want empty", got)
+		}
+		resp := responsesResponse{
+			Output: []responsesOutputItem{
+				{Type: "message", Role: "assistant", Content: []responsesContent{{Type: "output_text", Text: "ok"}}},
+			},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient("", WithBaseURL(server.URL), WithAPIType(APIResponses))
+	_, err := client.Generate(context.Background(), &ai.Request{
+		Model:      "test-model",
+		UserPrompt: "test",
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+}

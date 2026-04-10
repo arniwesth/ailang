@@ -86,7 +86,9 @@ func (c *Client) generateResponses(ctx context.Context, req *ai.Request) (*ai.Re
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	if strings.TrimSpace(c.apiKey) != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 
 	// Execute request
 	resp, err := c.httpClient.Do(httpReq)

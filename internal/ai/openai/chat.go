@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/sunholo/ailang/internal/ai"
 )
@@ -88,7 +89,9 @@ func (c *Client) generateChat(ctx context.Context, req *ai.Request) (*ai.Respons
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	if strings.TrimSpace(c.apiKey) != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 
 	// Execute request
 	resp, err := c.httpClient.Do(httpReq)
