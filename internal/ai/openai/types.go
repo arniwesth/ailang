@@ -100,12 +100,30 @@ const (
 
 // responsesRequest represents the request body for Responses API.
 type responsesRequest struct {
-	Model     string              `json:"model"`
-	Input     []responsesInput    `json:"input"`
-	Reasoning *responsesReasoning `json:"reasoning,omitempty"`
-	MaxTokens int                 `json:"max_output_tokens,omitempty"`
-	Text      *responsesText      `json:"text,omitempty"` // Structured output config
-	Stream    bool                `json:"stream,omitempty"`
+	Model              string               `json:"model"`
+	Input              []responsesInputItem `json:"input"`
+	Reasoning          *responsesReasoning  `json:"reasoning,omitempty"`
+	MaxTokens          int                  `json:"max_output_tokens,omitempty"`
+	Text               *responsesText       `json:"text,omitempty"` // Structured output config
+	Stream             bool                 `json:"stream,omitempty"`
+	PreviousResponseID string               `json:"previous_response_id,omitempty"`
+	Tools              []responsesTool      `json:"tools,omitempty"`
+	ToolChoice         string               `json:"tool_choice,omitempty"`
+}
+
+type responsesInputItem struct {
+	Role    string `json:"role,omitempty"`
+	Content string `json:"content,omitempty"`
+	Type    string `json:"type,omitempty"`
+	CallID  string `json:"call_id,omitempty"`
+	Output  string `json:"output,omitempty"`
+}
+
+type responsesTool struct {
+	Type        string          `json:"type"` // "function"
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters"`
 }
 
 // responsesText configures structured output for Responses API.
@@ -146,6 +164,7 @@ type responsesResponse struct {
 // Type can be: "message", "reasoning", "function_call"
 type responsesOutputItem struct {
 	Type    string             `json:"type"`
+	ID      string             `json:"id,omitempty"`
 	Status  string             `json:"status,omitempty"`
 	Role    string             `json:"role,omitempty"`    // for message type
 	Content []responsesContent `json:"content,omitempty"` // for message type
@@ -202,10 +221,16 @@ type chatDeltaStream struct {
 }
 
 type responsesStreamEvent struct {
-	Type     string           `json:"type"`
-	Delta    string           `json:"delta,omitempty"`
-	Response *responsesStream `json:"response,omitempty"`
-	Error    *struct {
+	Type           string               `json:"type"`
+	Delta          json.RawMessage      `json:"delta,omitempty"`
+	ArgumentsDelta json.RawMessage      `json:"arguments_delta,omitempty"`
+	Arguments      json.RawMessage      `json:"arguments,omitempty"`
+	Item           *responsesOutputItem `json:"item,omitempty"`
+	OutputIndex    int                  `json:"output_index,omitempty"`
+	Response       *responsesStream     `json:"response,omitempty"`
+	ResponseID     string               `json:"response_id,omitempty"`
+	ItemID         string               `json:"item_id,omitempty"`
+	Error          *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
 }

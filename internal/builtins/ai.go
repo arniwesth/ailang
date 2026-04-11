@@ -16,6 +16,7 @@ func init() {
 	registerAICallJsonResult()
 	registerAICallJsonSimpleResult()
 	registerAICallStreamResult()
+	registerAIContinueStreamResult()
 }
 
 // _ai_call: Call the AI oracle with a string input
@@ -310,6 +311,15 @@ func aiStreamChunkType() types.Type {
 	)
 }
 
+func aiNativeToolCallType() types.Type {
+	T := types.NewBuilder()
+	return T.Record(
+		types.Field("provider_call_id", T.String()),
+		types.Field("name", T.String()),
+		types.Field("arguments_json", T.String()),
+	)
+}
+
 func aiStreamResultRecordType() types.Type {
 	T := types.NewBuilder()
 	return T.Record(
@@ -323,6 +333,8 @@ func aiStreamResultRecordType() types.Type {
 		types.Field("chunks", T.List(aiStreamChunkType())),
 		types.Field("streamed", T.Bool()),
 		types.Field("stream_truncated", T.Bool()),
+		types.Field("native_calls", T.List(aiNativeToolCallType())),
+		types.Field("continuation_id", T.String()),
 	)
 }
 
@@ -479,4 +491,45 @@ func aiCallStreamResultImpl(ctx *effects.EffContext, args []eval.Value) (eval.Va
 		return nil, err
 	}
 	return effects.Call(ctx, "AI", "callStreamResult", args)
+}
+
+func makeAIContinueStreamResultType() types.Type {
+	T := types.NewBuilder()
+	return T.Func(T.String(), T.String(), T.Int(), T.String(), T.String()).Returns(aiStreamResultRecordType()).Effects("AI")
+}
+
+func registerAIContinueStreamResult() {
+	err := RegisterEffectBuiltin(BuiltinSpec{
+		Module:  "std/ai",
+		Name:    "_ai_continue_stream_result",
+		NumArgs: 5,
+		Effect:  "AI",
+		Type:    makeAIContinueStreamResultType,
+		Impl:    aiContinueStreamResultImpl,
+		Metadata: &BuiltinMetadata{
+			Description: "Continue a provider-native tool-calling stream turn with tool results",
+			Params: []ParamDoc{
+				{Name: "continuation_id", Description: "Provider continuation id"},
+				{Name: "tool_results_json", Description: "JSON array with provider_call_id/output_json items"},
+				{Name: "step", Description: "Runtime step index"},
+				{Name: "stream_id", Description: "Caller-generated stream id"},
+				{Name: "model", Description: "Model label for stream metadata"},
+			},
+			Returns:   "{ok, output, error_*, chunks, streamed, stream_truncated, native_calls, continuation_id}",
+			Since:     "v0.10.2",
+			Stability: StabilityExperimental,
+			Tags:      []string{"ai", "streaming", "tool-calling"},
+			Category:  "ai",
+		},
+	})
+	if err != nil {
+		panic("failed to register _ai_continue_stream_result builtin: " + err.Error())
+	}
+}
+
+func aiContinueStreamResultImpl(ctx *effects.EffContext, args []eval.Value) (eval.Value, error) {
+	if err := ctx.RequireCapWithBudget("AI", ""); err != nil {
+		return nil, err
+	}
+	return effects.Call(ctx, "AI", "continueStreamResult", args)
 }

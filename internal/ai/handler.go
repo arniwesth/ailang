@@ -127,12 +127,12 @@ func (h *Handler) CallWithContext(ctx context.Context, input string) (string, er
 // CallStream sends a request and emits typed stream deltas as they arrive.
 // If the provider does not implement StreamingProvider, this falls back to
 // a single-shot call and emits one synthetic delta with the full text.
-func (h *Handler) CallStream(input string, onEvent StreamHandler) (string, error) {
+func (h *Handler) CallStream(input string, onEvent StreamHandler) (*Response, error) {
 	return h.CallStreamWithContext(context.Background(), input, onEvent)
 }
 
 // CallStreamWithContext is like CallStream but accepts a context.
-func (h *Handler) CallStreamWithContext(ctx context.Context, input string, onEvent StreamHandler) (string, error) {
+func (h *Handler) CallStreamWithContext(ctx context.Context, input string, onEvent StreamHandler) (*Response, error) {
 	req := &Request{
 		Model:        h.model,
 		SystemPrompt: h.systemPrompt,
@@ -143,15 +143,15 @@ func (h *Handler) CallStreamWithContext(ctx context.Context, input string, onEve
 	if sp, ok := h.provider.(StreamingProvider); ok {
 		resp, err := sp.GenerateStream(ctx, req, onEvent)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return resp.Text, nil
+		return resp, nil
 	}
 
 	// Compatibility fallback for non-streaming providers.
 	resp, err := h.provider.Generate(ctx, req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if onEvent != nil && resp.Text != "" {
 		if err := onEvent(StreamEvent{
@@ -159,10 +159,24 @@ func (h *Handler) CallStreamWithContext(ctx context.Context, input string, onEve
 			Seq:       0,
 			TextDelta: resp.Text,
 		}); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
-	return resp.Text, nil
+	return resp, nil
+}
+
+// ContinueStream submits provider-native tool results and streams the
+// continuation response. Returns the full provider response.
+func (h *Handler) ContinueStream(continuationID string, results []NativeToolResult, onEvent StreamHandler) (*Response, error) {
+	return h.ContinueStreamWithContext(context.Background(), continuationID, results, onEvent)
+}
+
+// ContinueStreamWithContext is like ContinueStream but accepts a context.
+func (h *Handler) ContinueStreamWithContext(ctx context.Context, continuationID string, results []NativeToolResult, onEvent StreamHandler) (*Response, error) {
+	if p, ok := h.provider.(NativeToolStreamingProvider); ok {
+		return p.ContinueStream(ctx, h.model, continuationID, results, onEvent)
+	}
+	return nil, fmt.Errorf("provider %q does not support native tool continuation", h.provider.Name())
 }
 
 // GenerateWithDetails returns the full response including token counts.

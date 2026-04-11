@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/sunholo/ailang/internal/ai"
@@ -129,10 +130,29 @@ func (c *Client) GenerateStream(ctx context.Context, req *ai.Request, onEvent ai
 	}
 }
 
+// ContinueStream implements ai.NativeToolStreamingProvider.
+func (c *Client) ContinueStream(ctx context.Context, model string, continuationID string, results []ai.NativeToolResult, onEvent ai.StreamHandler) (*ai.Response, error) {
+	if c.detectAPIType(model) != APIResponses {
+		return nil, ai.NewProviderError("openai", 0, "native tool continuation requires responses API model", nil)
+	}
+	if strings.TrimSpace(continuationID) == "" {
+		return nil, ai.NewProviderError("openai", 0, "missing continuation id", nil)
+	}
+	return c.continueResponsesStream(ctx, model, continuationID, results, onEvent)
+}
+
 // detectAPIType determines which API to use based on the model name.
 // Responses API is preferred for all modern models (GPT-5+, o-series).
 // Chat Completions is only used for legacy models (GPT-4 and earlier).
 func (c *Client) detectAPIType(model string) APIType {
+	// Explicit environment override for OpenAI-compatible endpoints.
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_API_TYPE"))) {
+	case "responses":
+		return APIResponses
+	case "chat", "chat_completions", "chat-completions":
+		return APIChatCompletions
+	}
+
 	// If API type is explicitly set, use it
 	if c.apiType != "" {
 		return c.apiType

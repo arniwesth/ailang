@@ -87,6 +87,14 @@ type Response struct {
 
 	// Model is the model that was actually used (may differ from request)
 	Model string
+
+	// NativeToolCalls are provider-native tool/function calls requested by the model.
+	// Empty for normal text-only turns.
+	NativeToolCalls []NativeToolCall
+
+	// ContinuationID is the provider-specific id used to continue a native
+	// tool-calling turn after tool outputs are submitted.
+	ContinuationID string
 }
 
 // RequestsImage returns true if the request asks for image generation.
@@ -116,6 +124,8 @@ type StreamEventType string
 const (
 	// StreamEventDelta carries user-visible assistant text.
 	StreamEventDelta StreamEventType = "delta"
+	// StreamEventToolCall carries a provider-native tool call.
+	StreamEventToolCall StreamEventType = "tool_call"
 )
 
 // StreamEvent is a typed streaming chunk emitted during generation.
@@ -123,6 +133,7 @@ type StreamEvent struct {
 	Type      StreamEventType
 	Seq       int
 	TextDelta string
+	ToolCall  *NativeToolCall
 }
 
 // StreamHandler receives stream events in order.
@@ -132,6 +143,26 @@ type StreamHandler func(StreamEvent) error
 // support incremental token streaming.
 type StreamingProvider interface {
 	GenerateStream(ctx context.Context, req *Request, onEvent StreamHandler) (*Response, error)
+}
+
+// NativeToolCall is a provider-native tool/function call item.
+type NativeToolCall struct {
+	ProviderCallID string
+	Name           string
+	ArgumentsJSON  string
+}
+
+// NativeToolResult is a tool result submitted back to a provider-native
+// continuation endpoint.
+type NativeToolResult struct {
+	ProviderCallID string
+	OutputJSON     string
+}
+
+// NativeToolStreamingProvider is an optional extension implemented by
+// providers that support native tool-call continuation workflows.
+type NativeToolStreamingProvider interface {
+	ContinueStream(ctx context.Context, model string, continuationID string, results []NativeToolResult, onEvent StreamHandler) (*Response, error)
 }
 
 // ProviderError represents an error from an AI provider.

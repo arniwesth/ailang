@@ -33,7 +33,7 @@ type AIHandler interface {
 	Call(input string) (string, error)
 	// CallStream emits typed stream events for user-visible text and returns
 	// the final merged output.
-	CallStream(input string, onEvent ai.StreamHandler) (string, error)
+	CallStream(input string, onEvent ai.StreamHandler) (*ai.Response, error)
 	// CallJson sends a request configured for structured JSON output.
 	// If schema is non-empty, providers enforce the schema.
 	// Returns raw JSON string (caller parses to Json ADT).
@@ -45,6 +45,9 @@ type AIHandler interface {
 	// CallImageBase64 generates an image and returns it as a JSON string
 	// containing base64-encoded data: {"base64": "...", "mime_type": "image/png"}.
 	CallImageBase64(prompt string, options string) (string, error)
+	// ContinueStream submits provider-native tool results and streams the
+	// continuation response.
+	ContinueStream(continuationID string, results []ai.NativeToolResult, onEvent ai.StreamHandler) (*ai.Response, error)
 }
 
 // AIContext holds the handler for the current execution
@@ -75,9 +78,9 @@ func (c *AIContext) Call(input string) (string, error) {
 }
 
 // CallStream invokes the AI handler with typed stream events.
-func (c *AIContext) CallStream(input string, onEvent ai.StreamHandler) (string, error) {
+func (c *AIContext) CallStream(input string, onEvent ai.StreamHandler) (*ai.Response, error) {
 	if c.handler == nil {
-		return "", ErrNoAIHandler
+		return nil, ErrNoAIHandler
 	}
 	return c.handler.CallStream(input, onEvent)
 }
@@ -107,6 +110,14 @@ func (c *AIContext) CallImageBase64(prompt, options string) (string, error) {
 	return c.handler.CallImageBase64(prompt, options)
 }
 
+// ContinueStream submits provider-native tool results and streams continuation.
+func (c *AIContext) ContinueStream(continuationID string, results []ai.NativeToolResult, onEvent ai.StreamHandler) (*ai.Response, error) {
+	if c.handler == nil {
+		return nil, ErrNoAIHandler
+	}
+	return c.handler.ContinueStream(continuationID, results, onEvent)
+}
+
 // StubAIHandler returns deterministic placeholder responses
 //
 // Use for testing and development. Supports:
@@ -134,10 +145,10 @@ func (h *StubAIHandler) Call(input string) (string, error) {
 }
 
 // CallStream returns deterministic streamed output in a single chunk.
-func (h *StubAIHandler) CallStream(input string, onEvent ai.StreamHandler) (string, error) {
+func (h *StubAIHandler) CallStream(input string, onEvent ai.StreamHandler) (*ai.Response, error) {
 	out, err := h.Call(input)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if onEvent != nil && out != "" {
 		if err := onEvent(ai.StreamEvent{
@@ -145,10 +156,10 @@ func (h *StubAIHandler) CallStream(input string, onEvent ai.StreamHandler) (stri
 			Seq:       0,
 			TextDelta: out,
 		}); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
-	return out, nil
+	return &ai.Response{Text: out}, nil
 }
 
 // CallJson returns valid JSON for structured output requests.
@@ -187,6 +198,11 @@ func (h *StubAIHandler) CallImageBase64(prompt, options string) (string, error) 
 	return fmt.Sprintf(`{"base64":"%s","mime_type":"image/png"}`, b64), nil
 }
 
+// ContinueStream returns a deterministic empty continuation for stub mode.
+func (h *StubAIHandler) ContinueStream(continuationID string, results []ai.NativeToolResult, onEvent ai.StreamHandler) (*ai.Response, error) {
+	return &ai.Response{Text: "", ContinuationID: continuationID}, nil
+}
+
 // stubPNG is a minimal valid 1x1 transparent PNG (67 bytes).
 var stubPNG = func() []byte {
 	// Minimal 1x1 RGBA PNG
@@ -207,6 +223,7 @@ func init() {
 	RegisterOp("AI", "callJsonResult", aiCallJsonResult)
 	RegisterOp("AI", "callJsonSimpleResult", aiCallJsonSimpleResult)
 	RegisterOp("AI", "callStreamResult", aiCallStreamResult)
+	RegisterOp("AI", "continueStreamResult", aiContinueStreamResult)
 }
 
 // retryableStatuses is the set of HTTP status codes that warrant a retry.
@@ -282,6 +299,24 @@ func makeAIResultRecord(ok bool, output string, err error) *eval.RecordValue {
 type streamChunk struct {
 	seq       int
 	textDelta string
+}
+
+type nativeToolCall struct {
+	providerCallID string
+	name           string
+	argumentsJSON  string
+}
+
+func nativeCallsToEval(calls []nativeToolCall) *eval.ListValue {
+	items := make([]eval.Value, 0, len(calls))
+	for _, c := range calls {
+		items = append(items, &eval.RecordValue{Fields: map[string]eval.Value{
+			"provider_call_id": &eval.StringValue{Value: c.providerCallID},
+			"name":             &eval.StringValue{Value: c.name},
+			"arguments_json":   &eval.StringValue{Value: c.argumentsJSON},
+		}})
+	}
+	return &eval.ListValue{Elements: items}
 }
 
 func parseEnvInt(name string, fallback int) int {
@@ -377,7 +412,7 @@ func chunksToEval(chunks []streamChunk) *eval.ListValue {
 	return &eval.ListValue{Elements: items}
 }
 
-func makeAIStreamResultRecord(ok bool, output string, err error, chunks []streamChunk, streamed bool, truncated bool) *eval.RecordValue {
+func makeAIStreamResultRecord(ok bool, output string, err error, chunks []streamChunk, streamed bool, truncated bool, nativeCalls []nativeToolCall, continuationID string) *eval.RecordValue {
 	if ok {
 		return &eval.RecordValue{Fields: map[string]eval.Value{
 			"ok":               &eval.BoolValue{Value: true},
@@ -390,6 +425,8 @@ func makeAIStreamResultRecord(ok bool, output string, err error, chunks []stream
 			"chunks":           chunksToEval(chunks),
 			"streamed":         &eval.BoolValue{Value: streamed},
 			"stream_truncated": &eval.BoolValue{Value: truncated},
+			"native_calls":     nativeCallsToEval(nativeCalls),
+			"continuation_id":  &eval.StringValue{Value: continuationID},
 		}}
 	}
 	provider, errorCode, message, statusCode, retryable := classifyAIError(err)
@@ -404,6 +441,8 @@ func makeAIStreamResultRecord(ok bool, output string, err error, chunks []stream
 		"chunks":           chunksToEval(chunks),
 		"streamed":         &eval.BoolValue{Value: streamed},
 		"stream_truncated": &eval.BoolValue{Value: truncated},
+		"native_calls":     nativeCallsToEval(nativeCalls),
+		"continuation_id":  &eval.StringValue{Value: continuationID},
 	}}
 }
 
@@ -431,7 +470,7 @@ func aiCallStreamResult(ctx *EffContext, args []eval.Value) (eval.Value, error) 
 		return nil, fmt.Errorf("E_AI_TYPE_ERROR: callStreamResult: expected string model, got %T", args[3])
 	}
 	if ctx.AI == nil {
-		return makeAIStreamResultRecord(false, "", ErrNoAIHandler, nil, false, false), nil
+		return makeAIStreamResultRecord(false, "", ErrNoAIHandler, nil, false, false, nil, ""), nil
 	}
 
 	maxChunks := parseEnvInt("AI_STREAM_MAX_CHUNKS", 4000)
@@ -449,6 +488,8 @@ func aiCallStreamResult(ctx *EffContext, args []eval.Value) (eval.Value, error) 
 	truncated := false
 	emittedBytes := 0
 	aborted := false
+	nativeCalls := make([]nativeToolCall, 0, 8)
+	continuationID := ""
 
 	emitMotokoStreamEvent(ctx, "thinking_stream_start", map[string]any{
 		"step":      step.Value,
@@ -463,10 +504,20 @@ func aiCallStreamResult(ctx *EffContext, args []eval.Value) (eval.Value, error) 
 		}, "ok")
 	}
 
-	output, err := ctx.AI.CallStream(input.Value, func(ev ai.StreamEvent) error {
+	resp, err := ctx.AI.CallStream(input.Value, func(ev ai.StreamEvent) error {
 		if pollBufferedAbort(ctx) {
 			aborted = true
 			return fmt.Errorf("stream aborted by user")
+		}
+		if ev.Type == ai.StreamEventToolCall {
+			if ev.ToolCall != nil {
+				nativeCalls = append(nativeCalls, nativeToolCall{
+					providerCallID: ev.ToolCall.ProviderCallID,
+					name:           ev.ToolCall.Name,
+					argumentsJSON:  ev.ToolCall.ArgumentsJSON,
+				})
+			}
+			return nil
 		}
 		if ev.Type != ai.StreamEventDelta || ev.TextDelta == "" {
 			return nil
@@ -518,7 +569,7 @@ func aiCallStreamResult(ctx *EffContext, args []eval.Value) (eval.Value, error) 
 					"status=aborted",
 				}, "")
 			}
-			return makeAIStreamResultRecord(false, outputBuilder.String(), err, chunks, true, truncated), nil
+			return makeAIStreamResultRecord(false, outputBuilder.String(), err, chunks, true, truncated, nativeCalls, continuationID), nil
 		}
 		_, _, message, _, retryable := classifyAIError(err)
 		emitMotokoStreamEvent(ctx, "thinking_stream_error", map[string]any{
@@ -541,12 +592,12 @@ func aiCallStreamResult(ctx *EffContext, args []eval.Value) (eval.Value, error) 
 				"status=errored",
 			}, "")
 		}
-		return makeAIStreamResultRecord(false, outputBuilder.String(), err, chunks, true, truncated), nil
+		return makeAIStreamResultRecord(false, outputBuilder.String(), err, chunks, true, truncated, nativeCalls, continuationID), nil
 	}
 
-	finalOutput := output
-	if finalOutput == "" {
-		finalOutput = outputBuilder.String()
+	finalOutput := outputBuilder.String()
+	if resp != nil && resp.Text != "" {
+		finalOutput = resp.Text
 	}
 	emitMotokoStreamEvent(ctx, "thinking_stream_end", map[string]any{
 		"step":      step.Value,
@@ -559,7 +610,162 @@ func aiCallStreamResult(ctx *EffContext, args []eval.Value) (eval.Value, error) 
 			"status=completed",
 		}, "")
 	}
-	return makeAIStreamResultRecord(true, finalOutput, nil, chunks, true, truncated), nil
+	if resp != nil && resp.ContinuationID != "" {
+		continuationID = resp.ContinuationID
+	}
+	if resp != nil {
+		for _, c := range resp.NativeToolCalls {
+			nativeCalls = append(nativeCalls, nativeToolCall{
+				providerCallID: c.ProviderCallID,
+				name:           c.Name,
+				argumentsJSON:  c.ArgumentsJSON,
+			})
+		}
+	}
+	return makeAIStreamResultRecord(true, finalOutput, nil, chunks, true, truncated, nativeCalls, continuationID), nil
+}
+
+// AI.continueStreamResult(continuation_id: string, tool_results_json: string, step: int, stream_id: string, model: string)
+func aiContinueStreamResult(ctx *EffContext, args []eval.Value) (eval.Value, error) {
+	if len(args) < 5 {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: continueStreamResult: expected 5 arguments, got %d", len(args))
+	}
+	continuationID, ok := args[0].(*eval.StringValue)
+	if !ok {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: continueStreamResult: expected string continuation_id, got %T", args[0])
+	}
+	toolResultsJSON, ok := args[1].(*eval.StringValue)
+	if !ok {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: continueStreamResult: expected string tool_results_json, got %T", args[1])
+	}
+	step, ok := args[2].(*eval.IntValue)
+	if !ok {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: continueStreamResult: expected int step, got %T", args[2])
+	}
+	streamID, ok := args[3].(*eval.StringValue)
+	if !ok {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: continueStreamResult: expected string stream_id, got %T", args[3])
+	}
+	model, ok := args[4].(*eval.StringValue)
+	if !ok {
+		return nil, fmt.Errorf("E_AI_TYPE_ERROR: continueStreamResult: expected string model, got %T", args[4])
+	}
+	if ctx.AI == nil {
+		return makeAIStreamResultRecord(false, "", ErrNoAIHandler, nil, false, false, nil, continuationID.Value), nil
+	}
+
+	var raw []struct {
+		ProviderCallID string `json:"provider_call_id"`
+		OutputJSON     string `json:"output_json"`
+	}
+	if err := json.Unmarshal([]byte(toolResultsJSON.Value), &raw); err != nil {
+		return makeAIStreamResultRecord(false, "", fmt.Errorf("invalid tool_results_json: %w", err), nil, false, false, nil, continuationID.Value), nil
+	}
+	results := make([]ai.NativeToolResult, 0, len(raw))
+	for _, r := range raw {
+		if strings.TrimSpace(r.ProviderCallID) == "" {
+			continue
+		}
+		results = append(results, ai.NativeToolResult{
+			ProviderCallID: r.ProviderCallID,
+			OutputJSON:     r.OutputJSON,
+		})
+	}
+
+	maxChunks := parseEnvInt("AI_STREAM_MAX_CHUNKS", 4000)
+	maxBytes := parseEnvInt("AI_STREAM_MAX_BYTES", 2*1024*1024)
+	if maxChunks <= 0 {
+		maxChunks = 4000
+	}
+	if maxBytes <= 0 {
+		maxBytes = 2 * 1024 * 1024
+	}
+
+	chunks := make([]streamChunk, 0, 128)
+	nativeCalls := make([]nativeToolCall, 0, 8)
+	var outputBuilder strings.Builder
+	seq := 0
+	truncated := false
+	emittedBytes := 0
+	aborted := false
+
+	emitMotokoStreamEvent(ctx, "thinking_stream_start", map[string]any{
+		"step":      step.Value,
+		"stream_id": streamID.Value,
+		"model":     model.Value,
+	})
+
+	resp, err := ctx.AI.ContinueStream(continuationID.Value, results, func(ev ai.StreamEvent) error {
+		if pollBufferedAbort(ctx) {
+			aborted = true
+			return fmt.Errorf("stream aborted by user")
+		}
+		if ev.Type == ai.StreamEventToolCall {
+			if ev.ToolCall != nil {
+				nativeCalls = append(nativeCalls, nativeToolCall{
+					providerCallID: ev.ToolCall.ProviderCallID,
+					name:           ev.ToolCall.Name,
+					argumentsJSON:  ev.ToolCall.ArgumentsJSON,
+				})
+			}
+			return nil
+		}
+		if ev.Type != ai.StreamEventDelta || ev.TextDelta == "" {
+			return nil
+		}
+		if len(chunks) >= maxChunks || emittedBytes+len(ev.TextDelta) > maxBytes {
+			truncated = true
+			return nil
+		}
+		chunks = append(chunks, streamChunk{seq: seq, textDelta: ev.TextDelta})
+		outputBuilder.WriteString(ev.TextDelta)
+		emittedBytes += len(ev.TextDelta)
+		emitMotokoStreamEvent(ctx, "thinking_delta", map[string]any{
+			"step":       step.Value,
+			"stream_id":  streamID.Value,
+			"seq":        seq,
+			"text_delta": ev.TextDelta,
+		})
+		seq++
+		return nil
+	})
+	if err != nil {
+		status := "errored"
+		if aborted {
+			status = "aborted"
+		}
+		emitMotokoStreamEvent(ctx, "thinking_stream_end", map[string]any{
+			"step":      step.Value,
+			"stream_id": streamID.Value,
+			"status":    status,
+		})
+		return makeAIStreamResultRecord(false, outputBuilder.String(), err, chunks, true, truncated, nativeCalls, continuationID.Value), nil
+	}
+
+	finalOutput := outputBuilder.String()
+	contID := continuationID.Value
+	if resp != nil {
+		if resp.Text != "" {
+			finalOutput = resp.Text
+		}
+		if resp.ContinuationID != "" {
+			contID = resp.ContinuationID
+		}
+		for _, c := range resp.NativeToolCalls {
+			nativeCalls = append(nativeCalls, nativeToolCall{
+				providerCallID: c.ProviderCallID,
+				name:           c.Name,
+				argumentsJSON:  c.ArgumentsJSON,
+			})
+		}
+	}
+
+	emitMotokoStreamEvent(ctx, "thinking_stream_end", map[string]any{
+		"step":      step.Value,
+		"stream_id": streamID.Value,
+		"status":    "completed",
+	})
+	return makeAIStreamResultRecord(true, finalOutput, nil, chunks, true, truncated, nativeCalls, contID), nil
 }
 
 // aiCallResult implements AI.callResult(input: string) -> {ok, output, error_message, ...}

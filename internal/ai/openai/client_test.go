@@ -692,8 +692,8 @@ func TestClient_Generate_ResponsesAPI_PolymorphicOutput(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	// Should concatenate text from all message outputs
-	expected := "First part.\nSecond part."
+	// Includes reasoning summary plus assistant message outputs
+	expected := "Thinking...\nFirst part.\nSecond part."
 	if resp.Text != expected {
 		t.Errorf("Text = %q, want %q", resp.Text, expected)
 	}
@@ -712,21 +712,15 @@ func TestClient_Generate_ResponsesAPI_NoTextOutput(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient("test-key", WithBaseURL(server.URL), WithAPIType(APIResponses))
-	_, err := client.Generate(context.Background(), &ai.Request{
+	resp, err := client.Generate(context.Background(), &ai.Request{
 		Model:      "test",
 		UserPrompt: "test",
 	})
-
-	if err == nil {
-		t.Fatal("Generate() expected error for no text output, got nil")
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
 	}
-
-	providerErr, ok := err.(*ai.ProviderError)
-	if !ok {
-		t.Fatalf("err type = %T, want *ai.ProviderError", err)
-	}
-	if providerErr.Message != "no text output in response" {
-		t.Errorf("Message = %q, want %q", providerErr.Message, "no text output in response")
+	if resp.Text != "thinking" {
+		t.Errorf("Text = %q, want %q", resp.Text, "thinking")
 	}
 }
 

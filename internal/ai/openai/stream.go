@@ -2,6 +2,7 @@ package openai
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -46,6 +47,14 @@ func readSSEData(body io.Reader, onData func(string) error) error {
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		// Some OpenAI-compatible servers terminate chunked streams abruptly.
+		// Treat unexpected EOF as end-of-stream and flush buffered data.
+		if errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(strings.ToLower(err.Error()), "unexpected eof") {
+			if ferr := flush(); ferr != nil && ferr != io.EOF {
+				return ferr
+			}
+			return nil
+		}
 		return fmt.Errorf("failed reading stream: %w", err)
 	}
 	if err := flush(); err != nil && err != io.EOF {

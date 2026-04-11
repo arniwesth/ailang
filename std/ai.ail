@@ -90,6 +90,12 @@ export type AIStreamChunk = {
   text_delta: string
 }
 
+export type AINativeToolCall = {
+  provider_call_id: string,
+  name: string,
+  arguments_json: string
+}
+
 -- AIStreamResult: structured result for streaming calls.
 export type AIStreamResult = {
   ok: bool,
@@ -101,7 +107,9 @@ export type AIStreamResult = {
   error_code: string,
   chunks: [AIStreamChunk],
   streamed: bool,
-  stream_truncated: bool
+  stream_truncated: bool,
+  native_calls: [AINativeToolCall],
+  continuation_id: string
 }
 
 -- callResult: Call the AI oracle; returns Result[string, AIError] instead of crashing on errors.
@@ -152,3 +160,15 @@ export func callJsonSimpleResult(input: string) -> Result[string, AIError] ! {AI
 -- incremental stream events while preserving a typed return value.
 export func callStreamResult(input: string, step: int, stream_id: string, model: string) -> AIStreamResult ! {AI} =
   _ai_call_stream_result(input, step, stream_id, model)
+
+-- continueStreamResult: continue a provider-native tool-calling turn.
+-- tool_results_json must be a JSON array with objects:
+--   [{"provider_call_id":"...", "output_json":"..."}]
+export func continueStreamResult(
+  continuation_id: string,
+  tool_results_json: string,
+  step: int,
+  stream_id: string,
+  model: string
+) -> AIStreamResult ! {AI} =
+  _ai_continue_stream_result(continuation_id, tool_results_json, step, stream_id, model)
