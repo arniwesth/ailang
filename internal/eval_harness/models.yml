@@ -134,7 +134,7 @@ models:
 
   # Local Gemma 4 via OpenAI-compatible endpoint (DGX Spark)
   openai/google/gemma-4-26B-A4B-it:
-    api_name: "openai/google/gemma-4-26B-A4B-it"
+    api_name: "google/gemma-4-26B-A4B-it"
     provider: "openai"
     description: "Gemma 4 26B A4B-it served via OpenAI-compatible endpoint"
     env_var: "OPENAI_API_KEY"

@@ -128,15 +128,21 @@ func setupAIHandler(effCtx *effects.EffContext, aiStub bool, aiModel string) err
 		opts = append(opts, ai.WithMaxTokens(model.MaxOutputTokens))
 	}
 
+	// Normalize configured API model name by removing provider prefix when present.
+	// This keeps configured-model behavior aligned with setupAIHandlerDirect and
+	// avoids leaking labels like "openai/" into provider requests.
+	provider := ai.ProviderFromString(model.Provider)
+	apiModelName := stripProviderPrefix(model.APIName, provider)
+
 	// Create handler based on provider using unified ai package
 	var handler effects.AIHandler
-	switch ai.ProviderFromString(model.Provider) {
+	switch provider {
 	case ai.ProviderAnthropic:
 		if apiKey == "" {
 			return fmt.Errorf("%s environment variable required for model %s", model.EnvVar, aiModel)
 		}
 		client := anthropic.NewClient(apiKey)
-		handler = client.NewHandler(model.APIName, opts...)
+		handler = client.NewHandler(apiModelName, opts...)
 
 	case ai.ProviderOpenAI:
 		client, isCustomBaseURL, err := newOpenAIClient(apiKey)
@@ -146,7 +152,7 @@ func setupAIHandler(effCtx *effects.EffContext, aiStub bool, aiModel string) err
 		if apiKey == "" && !isCustomBaseURL {
 			return fmt.Errorf("%s environment variable required for model %s", model.EnvVar, aiModel)
 		}
-		handler = client.NewHandler(model.APIName, opts...)
+		handler = client.NewHandler(apiModelName, opts...)
 
 	case ai.ProviderGoogle:
 		// Precedence: ADC first (if available), then GOOGLE_API_KEY.
@@ -154,11 +160,11 @@ func setupAIHandler(effCtx *effects.EffContext, aiStub bool, aiModel string) err
 		// for Vertex AI access. Try ADC silently first; fall back to API key.
 		if client, err := gemini.NewVertexAIClient(""); err == nil {
 			fmt.Fprintf(os.Stderr, "AI: Using Vertex AI (ADC)\n")
-			handler = client.NewHandler(model.APIName, opts...)
+			handler = client.NewHandler(apiModelName, opts...)
 		} else if apiKey != "" {
 			fmt.Fprintf(os.Stderr, "AI: Using Google AI Studio (GOOGLE_API_KEY)\n")
 			client := gemini.NewClient(apiKey)
-			handler = client.NewHandler(model.APIName, opts...)
+			handler = client.NewHandler(apiModelName, opts...)
 		} else {
 			return fmt.Errorf("Gemini auth failed: Application Default Credentials (ADC) not configured, and GOOGLE_API_KEY is not set.\n"+
 				"  Option 1: gcloud auth application-default login  (recommended, for Vertex AI)\n"+
@@ -176,16 +182,14 @@ func setupAIHandler(effCtx *effects.EffContext, aiStub bool, aiModel string) err
 		if err := client.CheckConnection(context.Background()); err != nil {
 			return err
 		}
-		handler = client.NewHandler(model.APIName, opts...)
+		handler = client.NewHandler(apiModelName, opts...)
 
 	case ai.ProviderOpenRouter:
 		if apiKey == "" {
 			return fmt.Errorf("%s environment variable required for model %s", model.EnvVar, aiModel)
 		}
 		client := openai.NewClient(apiKey, openai.WithBaseURL("https://openrouter.ai/api/v1"))
-		// Strip openrouter/ prefix to get the bare model id for the API
-		modelName := strings.TrimPrefix(model.APIName, "openrouter/")
-		handler = client.NewHandler(modelName, opts...)
+		handler = client.NewHandler(apiModelName, opts...)
 
 	default:
 		return fmt.Errorf("unsupported AI provider: %s", model.Provider)
