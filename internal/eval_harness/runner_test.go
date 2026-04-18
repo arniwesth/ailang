@@ -210,6 +210,8 @@ func TestGetRunner(t *testing.T) {
 	}{
 		{"python", false},
 		{"ailang", false},
+		{"fsharp", false},
+		{"fsharp-constrained", false},
 		{"javascript", true},
 	}
 

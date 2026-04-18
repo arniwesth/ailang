@@ -13,6 +13,7 @@ type RepairRunner struct {
 	spec          *BenchmarkSpec
 	timeout       time.Duration
 	selfRepair    bool
+	languageLabel string        // Optional language label override for metrics/output
 	promptVersion string        // Optional prompt version ID for A/B testing
 	verify        bool          // M-CONTRACT-EVAL: run Z3 verification
 	verifyTimeout time.Duration // M-CONTRACT-EVAL: per-function Z3 timeout
@@ -26,6 +27,7 @@ func NewRepairRunner(agent *AIAgent, runner LanguageRunner, spec *BenchmarkSpec,
 		spec:          spec,
 		timeout:       timeout,
 		selfRepair:    selfRepair,
+		languageLabel: runner.Language(),
 		verifyTimeout: 5 * time.Second, // default
 	}
 }
@@ -43,9 +45,17 @@ func (r *RepairRunner) SetPromptVersion(version string) {
 	r.promptVersion = version
 }
 
+// SetLanguageLabel overrides the language label written to metrics/output.
+// Useful when prompt variants share one runner implementation.
+func (r *RepairRunner) SetLanguageLabel(lang string) {
+	if lang != "" {
+		r.languageLabel = lang
+	}
+}
+
 // Run executes the benchmark with optional self-repair
 func (r *RepairRunner) Run(ctx context.Context, prompt string) (*RunMetrics, error) {
-	metrics := NewRunMetrics(r.spec.ID, r.runner.Language(), r.agent.friendlyName, r.agent.seed)
+	metrics := NewRunMetrics(r.spec.ID, r.languageLabel, r.agent.friendlyName, r.agent.seed)
 	metrics.PromptVersion = r.promptVersion // Track prompt version for A/B testing
 	metrics.EvalMode = EvalModeStandard     // Mark as standard evaluation (0-shot + self-repair)
 

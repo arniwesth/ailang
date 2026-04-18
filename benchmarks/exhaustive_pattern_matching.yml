@@ -1,6 +1,6 @@
 id: exhaustive_pattern_matching
 description: "Total functions with exhaustive pattern matching (no runtime crashes)"
-languages: ["python", "ailang"]
+languages: ["python", "ailang", "fsharp"]
 entrypoint: "main"
 caps: ["IO"]
 difficulty: "medium"

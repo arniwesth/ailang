@@ -101,6 +101,12 @@ type MetricsLogger struct {
 	outputDir string
 }
 
+// SanitizeModelForFilename makes a model identifier safe for use in result filenames.
+func SanitizeModelForFilename(model string) string {
+	replacer := strings.NewReplacer(":", "_", "/", "_", "\\", "_")
+	return replacer.Replace(model)
+}
+
 // NewMetricsLogger creates a new metrics logger
 func NewMetricsLogger(outputDir string) *MetricsLogger {
 	return &MetricsLogger{
@@ -152,8 +158,7 @@ func (l *MetricsLogger) Log(m *RunMetrics) error {
 	}
 
 	// Generate filename: <id>_<lang>_<model>_<timestamp>.json
-	// Sanitize model name: replace colons with underscores (Windows compatibility)
-	sanitizedModel := strings.ReplaceAll(m.Model, ":", "_")
+	sanitizedModel := SanitizeModelForFilename(m.Model)
 	filename := fmt.Sprintf("%s_%s_%s_%d.json",
 		m.ID,
 		m.Lang,

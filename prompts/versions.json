@@ -118,6 +118,17 @@
       ],
       "notes": "Used for baseline comparison - how well do models do with Python vs AILANG?"
     },
+    "fsharp": {
+      "file": "prompts/fsharp.md",
+      "hash": "PLACEHOLDER",
+      "description": "F# language teaching prompt for eval harness benchmark mode",
+      "created": "2026-04-17",
+      "tags": [
+        "control",
+        "fsharp"
+      ],
+      "notes": "Used for F# benchmark runs in eval harness (dotnet fsi script mode)."
+    },
     "v0.3.16": {
       "file": "prompts/v0.3.16.md",
       "hash": "f6e1e7a39e35aa7a7116d11f8fb9d01b1be7862b0723a1ed3d8ed8b76030501d",

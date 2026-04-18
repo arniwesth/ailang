@@ -141,6 +141,7 @@ func runEval() {
 		// Create RepairRunner and execute with optional self-repair
 		ctx := context.Background()
 		repairRunner := eval_harness.NewRepairRunner(agent, runner, spec, *timeout, *selfRepair)
+		repairRunner.SetLanguageLabel(lang)
 		if *promptVersion != "" {
 			repairRunner.SetPromptVersion(*promptVersion)
 		}

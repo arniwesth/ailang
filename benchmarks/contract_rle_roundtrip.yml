@@ -2,7 +2,7 @@ id: contract_rle_roundtrip
 description: "Run-length encoding and decoding with roundtrip invariant — string manipulation + list processing"
 difficulty: hard
 category: algorithm_from_spec
-languages: ["ailang", "python"]
+languages: ["ailang", "python", "fsharp"]
 entrypoint: "main"
 caps: ["IO"]
 

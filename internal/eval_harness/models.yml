@@ -132,6 +132,22 @@ models:
       Uses max_completion_tokens instead of max_tokens.
       Agent eval support: Not yet implemented (requires OpenAI Codex CLI).
 
+  # Local Gemma 4 via OpenAI-compatible endpoint (DGX Spark)
+  openai/google/gemma-4-26B-A4B-it:
+    api_name: "openai/google/gemma-4-26B-A4B-it"
+    provider: "openai"
+    description: "Gemma 4 26B A4B-it served via OpenAI-compatible endpoint"
+    env_var: "OPENAI_API_KEY"
+    agent_cli: null
+    max_output_tokens: 4096
+    pricing:
+      input_per_1k: 0.0
+      output_per_1k: 0.0
+    notes: |
+      Intended for local/private inference with OPENAI_BASE_URL override.
+      OPENAI_API_KEY may be omitted when OPENAI_BASE_URL is set.
+      Useful for benchmarking OpenAI-compatible local model servers.
+
   # OpenAI GPT-5.2-Codex (released January 2026)
   gpt5-2-codex:
     api_name: "gpt-5.2-codex"

@@ -425,6 +425,7 @@ func runSingleBenchmark(ctx context.Context, model, benchmarkID, lang, condition
 
 	// Execute with repair runner (use ctx from span, not new context)
 	repairRunner := eval_harness.NewRepairRunner(agent, runner, spec, timeout, selfRepair)
+	repairRunner.SetLanguageLabel(lang)
 	if actualPromptVersion != "" {
 		repairRunner.SetPromptVersion(actualPromptVersion)
 	}

@@ -15,6 +15,8 @@ func GenerateAgentPrompt(spec *BenchmarkSpec, config AgentBenchmarkConfig, synta
 	switch language {
 	case "python":
 		templatePath = "internal/eval_harness/templates/agent_prompt_python.txt"
+	case "fsharp", "fsharp-constrained":
+		templatePath = "internal/eval_harness/templates/agent_prompt_fsharp.txt"
 	case "ailang":
 		templatePath = "internal/eval_harness/templates/agent_prompt.txt"
 	default:
@@ -44,6 +46,9 @@ func getDefaultPromptTemplate(language string) string {
 	// Return language-specific default
 	if language == "python" {
 		return getDefaultPythonTemplate()
+	}
+	if language == "fsharp" || language == "fsharp-constrained" {
+		return getDefaultFSharpTemplate()
 	}
 	return getDefaultAILANGTemplate()
 }
@@ -110,6 +115,8 @@ func LoadActiveSyntaxReference(language string) (string, error) {
 		return loadAILANGPrompt()
 	case "python":
 		return loadPythonPrompt()
+	case "fsharp", "fsharp-constrained":
+		return loadFSharpPrompt()
 	default:
 		// Default to AILANG for unknown languages
 		return loadAILANGPrompt()
@@ -142,6 +149,17 @@ func loadPythonPrompt() (string, error) {
 	data, err := os.ReadFile(pythonPromptPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read python prompt: %w", err)
+	}
+
+	return string(data), nil
+}
+
+// loadFSharpPrompt loads the F# teaching prompt
+func loadFSharpPrompt() (string, error) {
+	fsharpPromptPath := "prompts/fsharp.md"
+	data, err := os.ReadFile(fsharpPromptPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read fsharp prompt: %w", err)
 	}
 
 	return string(data), nil
@@ -323,6 +341,56 @@ Good luck!
 `
 }
 
+// getDefaultFSharpTemplate returns the F# template
+func getDefaultFSharpTemplate() string {
+	return `You are solving an F# benchmark in an isolated workspace.
+
+## Workspace Files
+
+- **README.md**: Problem description and expected output
+- **solution.fsx**: Your implementation (currently empty - you will write this)
+- **syntax_reference.md**: F# language reference
+
+## Your Task
+
+1. Read README.md to understand the problem and expected output
+2. Read syntax_reference.md for F# syntax guidance
+3. Write your solution in solution.fsx
+4. Test: Run 'dotnet fsi solution.fsx'
+5. Compare output with expected output from README.md
+6. If output doesn't match, iterate and fix
+7. Repeat steps 4-6 until output matches exactly
+
+## Success Criteria
+
+✓ solution.fsx runs without errors
+✓ Output matches expected output exactly (whitespace is trimmed)
+
+## Constraints
+
+- Timeout: {{TIMEOUT}} seconds
+- Solution must be in solution.fsx (not inline or in comments)
+
+## Tools Available
+
+You have access to:
+- Bash: Run dotnet fsi commands, check files
+- Read: Read README.md, syntax_reference.md
+- Write: Create solution.fsx
+- Edit: Modify solution.fsx
+- Grep: Search for patterns in files
+
+## Tips
+
+- Start simple: Get basic structure working first
+- Test frequently with 'dotnet fsi solution.fsx'
+- Keep output deterministic and exact
+- Use F# standard library only
+
+Good luck!
+`
+}
+
 // LoadSystemPromptForLanguage loads the versioned teaching prompt for a language
 // This is used with Claude CLI's --system-prompt flag
 func LoadSystemPromptForLanguage(language string, promptVersion string) (string, string, error) {
@@ -365,6 +433,13 @@ func LoadSystemPromptForLanguage(language string, promptVersion string) (string,
 		}
 		versionUsed = "python"
 
+	case "fsharp", "fsharp-constrained":
+		prompt, err = loader.LoadPrompt("fsharp")
+		if err != nil {
+			return "", "", fmt.Errorf("failed to load F# prompt: %w", err)
+		}
+		versionUsed = "fsharp"
+
 	default:
 		return "", "", fmt.Errorf("unsupported language: %s", language)
 	}
@@ -379,6 +454,8 @@ func LoadTaskPromptTemplate(language string) (string, error) {
 	switch language {
 	case "python":
 		templatePath = "internal/eval_harness/templates/agent_task_python.txt"
+	case "fsharp", "fsharp-constrained":
+		templatePath = "internal/eval_harness/templates/agent_task_fsharp.txt"
 	case "ailang":
 		templatePath = "internal/eval_harness/templates/agent_task_ailang.txt"
 	default:
@@ -413,6 +490,36 @@ Expected output:
 - Timeout: {{TIMEOUT}} seconds
 - Write your solution to: **{{SOLUTION_PATH}}**
 - Your solution must produce output matching the expected output exactly
+
+Good luck!`
+	}
+	if language == "fsharp" || language == "fsharp-constrained" {
+		return `You are solving an F# benchmark.
+
+## Task
+
+{{DESCRIPTION}}
+
+**IMPORTANT: Write your complete solution to: {{SOLUTION_PATH}}**
+
+Expected output:
+{{EXPECTED_OUTPUT}}
+
+## Constraints
+
+- Timeout: {{TIMEOUT}} seconds
+- Write your solution to: **{{SOLUTION_PATH}}**
+- Run your solution with: dotnet fsi {{SOLUTION_PATH}}
+- Your solution must produce output matching the expected output exactly
+
+## Verification (REQUIRED)
+
+**Before finishing, you MUST verify your solution works correctly:**
+
+1. **Run your solution:** ` + "`dotnet fsi {{SOLUTION_PATH}}`" + `
+2. **Check the output matches expected output exactly** (no extra newlines, spaces, etc.)
+3. **If output doesn't match, fix and re-run until it matches**
+4. **Only finish once you've confirmed output is correct**
 
 Good luck!`
 	}
@@ -525,6 +632,8 @@ func GenerateAgentPromptsWithSystemPrompt(spec *BenchmarkSpec, config AgentBench
 		languageName = "Python"
 	} else if language == "ailang" {
 		languageName = "AILANG"
+	} else if language == "fsharp" || language == "fsharp-constrained" {
+		languageName = "F#"
 	}
 	taskPrompt = strings.ReplaceAll(taskPrompt, "<LANG>", languageName)
 

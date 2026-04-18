@@ -1,6 +1,6 @@
 id: effect_pure_separation
 description: "Pure vs effectful function separation (type system enforcement)"
-languages: ["python", "ailang"]
+languages: ["python", "ailang", "fsharp"]
 entrypoint: "main"
 caps: ["IO"]
 difficulty: "medium"

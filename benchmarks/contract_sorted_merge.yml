@@ -2,7 +2,7 @@ id: contract_sorted_merge
 description: "Sorted list merge with dedup, intersection, and set algebra proofs — list ADT recursion + multiple invariants"
 difficulty: very_hard
 category: data_structure
-languages: ["ailang", "python"]
+languages: ["ailang", "python", "fsharp"]
 entrypoint: "main"
 caps: ["IO"]
 

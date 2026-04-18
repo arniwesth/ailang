@@ -120,3 +120,11 @@ func TestNewRunMetrics(t *testing.T) {
 		t.Error("Timestamp is not recent")
 	}
 }
+
+func TestSanitizeModelForFilename(t *testing.T) {
+	got := SanitizeModelForFilename("openai/google/gemma-4-26B-A4B-it:latest")
+	want := "openai_google_gemma-4-26B-A4B-it_latest"
+	if got != want {
+		t.Fatalf("SanitizeModelForFilename() = %q, want %q", got, want)
+	}
+}

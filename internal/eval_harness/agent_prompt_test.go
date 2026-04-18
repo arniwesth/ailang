@@ -62,6 +62,19 @@ func TestGenerateAgentPrompt(t *testing.T) {
 			t.Errorf("Python prompt missing section: %s", section)
 		}
 	}
+
+	// Test F# prompt
+	promptFSharp := GenerateAgentPrompt(spec, config, syntaxRef, "fsharp")
+	fsharpSections := []string{
+		"F# benchmark",
+		"solution.fsx",
+		"dotnet fsi",
+	}
+	for _, section := range fsharpSections {
+		if !strings.Contains(promptFSharp, section) {
+			t.Errorf("F# prompt missing section: %s", section)
+		}
+	}
 }
 
 func TestLoadActiveSyntaxReference(t *testing.T) {
@@ -102,6 +115,18 @@ func TestLoadActiveSyntaxReference(t *testing.T) {
 	// Check it looks like Python documentation
 	if !strings.Contains(pythonRef, "Python") && !strings.Contains(pythonRef, "def") {
 		t.Error("Python syntax reference doesn't look like Python docs")
+	}
+
+	// Test F#
+	fsharpRef, err := LoadActiveSyntaxReference("fsharp")
+	if err != nil {
+		t.Skipf("Cannot load F# syntax reference (prompts/fsharp.md may not be accessible): %v", err)
+	}
+	if len(fsharpRef) == 0 {
+		t.Error("F# syntax reference is empty")
+	}
+	if !strings.Contains(fsharpRef, "F#") && !strings.Contains(fsharpRef, "dotnet fsi") {
+		t.Error("F# syntax reference doesn't look like F# docs")
 	}
 }
 
@@ -242,6 +267,18 @@ func TestEnhancedGenerateAgentPrompt(t *testing.T) {
 
 	// Log what we got for debugging
 	t.Logf("Python ref preview: %s...", pythonRef[:min(100, len(pythonRef))])
+
+	// Test with F# (may fall back to default if prompts/fsharp.md not accessible)
+	fsharpPrompt, fsharpRef, err := EnhancedGenerateAgentPrompt(spec, config, "fsharp")
+	if err != nil {
+		t.Logf("F# prompt returned error (expected if prompts/fsharp.md not accessible): %v", err)
+	}
+	if len(fsharpPrompt) == 0 {
+		t.Error("F# prompt is empty")
+	}
+	if len(fsharpRef) == 0 {
+		t.Error("F# syntax reference is empty")
+	}
 }
 
 func TestPrepareWorkspaceWithEmptySyntax(t *testing.T) {
@@ -301,6 +338,13 @@ func TestLanguagePlaceholderReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Create F# prompt file
+	fsharpPrompt := "# F# Guidelines\nWrite idiomatic F# script code."
+	fsharpPath := filepath.Join(promptsDir, "fsharp.md")
+	if err := os.WriteFile(fsharpPath, []byte(fsharpPrompt), 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	// Create task templates
 	pythonTemplate := "Python task: {{DESCRIPTION}}\nExpected: {{EXPECTED_OUTPUT}}"
 	pythonTemplatePath := filepath.Join(templatesDir, "agent_task_python.txt")
@@ -314,11 +358,18 @@ func TestLanguagePlaceholderReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	fsharpTemplate := "F# task: {{DESCRIPTION}}\nExpected: {{EXPECTED_OUTPUT}}"
+	fsharpTemplatePath := filepath.Join(templatesDir, "agent_task_fsharp.txt")
+	if err := os.WriteFile(fsharpTemplatePath, []byte(fsharpTemplate), 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	// Create registry
 	registry := PromptRegistry{
 		SchemaVersion: "1.0",
 		Versions: map[string]PromptVersion{
 			"python":  {File: "prompts/python.md", Hash: "PLACEHOLDER"},
+			"fsharp":  {File: "prompts/fsharp.md", Hash: "PLACEHOLDER"},
 			"ailang1": {File: "prompts/ailang.md", Hash: "PLACEHOLDER"},
 		},
 		Active: "ailang1",
@@ -373,6 +424,18 @@ func TestLanguagePlaceholderReplacement(t *testing.T) {
 	if !strings.Contains(taskPromptAILANG, "Write a program in AILANG") {
 		t.Error("AILANG task prompt doesn't contain 'Write a program in AILANG'")
 	}
+
+	// Test F#
+	_, taskPromptFSharp, _, err := GenerateAgentPromptsWithSystemPrompt(spec, config, "fsharp", "", "solution.fsx")
+	if err != nil {
+		t.Fatalf("GenerateAgentPromptsWithSystemPrompt failed for F#: %v", err)
+	}
+	if strings.Contains(taskPromptFSharp, "<LANG>") {
+		t.Error("F# task prompt still contains <LANG> placeholder")
+	}
+	if !strings.Contains(taskPromptFSharp, "Write a program in F#") {
+		t.Error("F# task prompt doesn't contain 'Write a program in F#'")
+	}
 }
 
 // TestSystemPromptLanguageSeparation verifies Python gets Python prompt, AILANG gets AILANG prompt
@@ -402,6 +465,13 @@ func TestSystemPromptLanguageSeparation(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Create F# prompt file
+	fsharpPrompt := "# F# Programming Guidelines\n\nUse dotnet fsi for script execution."
+	fsharpPath := filepath.Join(promptsDir, "fsharp.md")
+	if err := os.WriteFile(fsharpPath, []byte(fsharpPrompt), 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	// Create task templates
 	pythonTemplate := "Python task: {{DESCRIPTION}}"
 	pythonTemplatePath := filepath.Join(templatesDir, "agent_task_python.txt")
@@ -415,11 +485,18 @@ func TestSystemPromptLanguageSeparation(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	fsharpTemplate := "F# task: {{DESCRIPTION}}"
+	fsharpTemplatePath := filepath.Join(templatesDir, "agent_task_fsharp.txt")
+	if err := os.WriteFile(fsharpTemplatePath, []byte(fsharpTemplate), 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	// Create registry
 	registry := PromptRegistry{
 		SchemaVersion: "1.0",
 		Versions: map[string]PromptVersion{
 			"python":  {File: "prompts/python.md", Hash: "PLACEHOLDER"},
+			"fsharp":  {File: "prompts/fsharp.md", Hash: "PLACEHOLDER"},
 			"v0.3.23": {File: "prompts/ailang.md", Hash: "PLACEHOLDER"},
 		},
 		Active: "v0.3.23",
@@ -481,5 +558,17 @@ func TestSystemPromptLanguageSeparation(t *testing.T) {
 	// AILANG system prompt should contain AILANG-specific content
 	if !strings.Contains(systemPromptAILANG, "AILANG") && !strings.Contains(systemPromptAILANG, "ailang") {
 		t.Error("AILANG system prompt doesn't contain 'AILANG' or 'ailang'")
+	}
+
+	// Test F# gets F# system prompt
+	systemPromptFSharp, _, promptVersionFSharp, err := GenerateAgentPromptsWithSystemPrompt(spec, config, "fsharp", "", "solution.fsx")
+	if err != nil {
+		t.Fatalf("GenerateAgentPromptsWithSystemPrompt failed for F#: %v", err)
+	}
+	if promptVersionFSharp != "fsharp" {
+		t.Errorf("F# prompt version incorrect: got %q, want %q", promptVersionFSharp, "fsharp")
+	}
+	if !strings.Contains(systemPromptFSharp, "F#") && !strings.Contains(systemPromptFSharp, "dotnet fsi") {
+		t.Error("F# system prompt doesn't contain F#-specific content")
 	}
 }

@@ -69,7 +69,7 @@ prompt: "Test"
 func TestSupportsLanguage(t *testing.T) {
 	spec := &BenchmarkSpec{
 		ID:        "test",
-		Languages: []string{"python", "ailang"},
+		Languages: []string{"python", "ailang", "fsharp"},
 		Prompt:    "test",
 	}
 
@@ -79,6 +79,8 @@ func TestSupportsLanguage(t *testing.T) {
 	}{
 		{"python", true},
 		{"ailang", true},
+		{"fsharp", true},
+		{"fsharp-constrained", true},
 		{"javascript", false},
 		{"", false},
 	}
@@ -125,6 +127,44 @@ func TestPromptForLanguage(t *testing.T) {
 	}
 	if !containsSubstring(ailangResult, "prints hello") {
 		t.Errorf("PromptForLanguage(ailang) should contain task description 'prints hello'")
+	}
+}
+
+func TestPromptForLanguage_FSharpUsesTeacherPrompt(t *testing.T) {
+	spec := &BenchmarkSpec{
+		ID:     "test",
+		Prompt: "Write code in <LANG> that prints hello",
+	}
+
+	// F# should use teacher prompt as base and append task description.
+	fsharpResult := spec.PromptForLanguage("fsharp")
+
+	if !containsSubstring(fsharpResult, "# F# Prompt Reference") {
+		t.Fatalf("PromptForLanguage(fsharp) should include F# teacher prompt header")
+	}
+	if !containsSubstring(fsharpResult, "## Task") {
+		t.Fatalf("PromptForLanguage(fsharp) should append task section")
+	}
+	if !containsSubstring(fsharpResult, "Write code in F# that prints hello") {
+		t.Fatalf("PromptForLanguage(fsharp) should include task with <LANG> replaced by F#")
+	}
+}
+
+func TestPromptForLanguage_FSharpConstrainedIncludesRulesAndTeacher(t *testing.T) {
+	spec := &BenchmarkSpec{
+		ID:     "test",
+		Prompt: "Solve in <LANG>.",
+	}
+
+	constrained := spec.PromptForLanguage("fsharp-constrained")
+	if !containsSubstring(constrained, "# F# Prompt Reference") {
+		t.Fatalf("PromptForLanguage(fsharp-constrained) should include F# teacher prompt")
+	}
+	if !containsSubstring(constrained, "RULES — what you MUST NOT use") {
+		t.Fatalf("PromptForLanguage(fsharp-constrained) should include constrained rules")
+	}
+	if !containsSubstring(constrained, "Solve in F#.") {
+		t.Fatalf("PromptForLanguage(fsharp-constrained) should replace <LANG> with F# in task")
 	}
 }
 

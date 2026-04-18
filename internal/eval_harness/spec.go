@@ -3,6 +3,7 @@ package eval_harness
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	promptpkg "github.com/sunholo/ailang/internal/prompt"
 	"gopkg.in/yaml.v3"
@@ -61,6 +62,10 @@ func LoadSpec(path string) (*BenchmarkSpec, error) {
 
 // SupportsLanguage checks if the benchmark supports a given language
 func (s *BenchmarkSpec) SupportsLanguage(lang string) bool {
+	// Prompt-level variant: fsharp-constrained uses the fsharp runner/spec support.
+	if lang == "fsharp-constrained" {
+		lang = "fsharp"
+	}
 	for _, l := range s.Languages {
 		if l == lang {
 			return true
@@ -74,13 +79,13 @@ func (s *BenchmarkSpec) PromptForLanguage(lang string) string {
 	var basePrompt string
 	var taskDescription string
 
-	// For AILANG: ALWAYS use teaching prompt as base, treat s.Prompt as task description
-	// This ensures the model always has AILANG syntax reference
-	if lang == "ailang" {
+	// For AILANG/F#: ALWAYS use teaching prompt as base, treat inline prompt as task description.
+	// This ensures niche languages have explicit teacher guidance regardless of benchmark YAML shape.
+	if lang == "ailang" || lang == "fsharp" || lang == "fsharp-constrained" {
 		// Always load the teaching prompt for AILANG
-		basePrompt = getDefaultPrompt("ailang")
+		basePrompt = getDefaultPrompt(lang)
 
-		// The inline prompt field is the task description for AILANG
+		// The inline prompt field is the task description
 		if s.TaskPrompt != "" {
 			taskDescription = s.TaskPrompt
 		} else if s.Prompt != "" {
@@ -124,6 +129,8 @@ func (s *BenchmarkSpec) PromptForLanguage(lang string) string {
 		langName = "Python 3"
 	case "ailang":
 		langName = "AILANG"
+	case "fsharp", "fsharp-constrained":
+		langName = "F#"
 	}
 
 	// Replace <LANG> placeholder
@@ -144,6 +151,44 @@ func getDefaultPrompt(lang string) string {
 		}
 		// Fallback if prompt loader fails
 		return "You are writing code in AILANG, a functional programming language."
+	case "fsharp":
+		// Use versioned prompt registry key "fsharp" when available.
+		// This keeps F# guidance on the same managed path as AILANG.
+		fsharpPrompt, err := promptpkg.LoadPrompt("fsharp")
+		if err == nil {
+			return fsharpPrompt
+		}
+		return `You are writing F# (.fsx script format).
+Write a complete F# script that can be executed with dotnet fsi.
+Use printfn for output. Do not use any NuGet packages.
+Output only the code, no explanations.`
+	case "fsharp-constrained":
+		base := getDefaultPrompt("fsharp")
+		if strings.TrimSpace(base) == "" {
+			base = "You are writing F# (.fsx script format)."
+		}
+		return base + `
+
+Additionally, write in a PURE FUNCTIONAL subset.
+
+RULES — what you MUST NOT use:
+- NO mutable variables (no let mutable, no ref)
+- NO imperative loops (no for, while, do loops) — use recursion instead
+- NO classes, interfaces, structs, or object expressions
+- NO computation expressions (no async { }, task { }, seq { })
+- NO .NET BCL beyond what is listed below
+- Do not use any NuGet packages
+
+RULES — what you SHOULD use:
+- Use printfn for output, sprintf for formatting
+- Use recursion for all iteration
+- Use discriminated unions for algebraic data types
+- Use pattern matching with match ... with
+- Use pipe operator (|>) freely
+- You MAY use: List, Array, String, Option, Result, Map, Set module functions
+- You MAY use: System.Text.Json for JSON tasks
+
+Output only the code, no explanations.`
 	default:
 		return "Write clean, idiomatic code in the specified language."
 	}

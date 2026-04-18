@@ -479,6 +479,8 @@ func GetRunnerWithContext(ctx context.Context, lang string, spec *BenchmarkSpec,
 	case "ailang":
 		runner := NewAILANGRunnerWithTask(ctx, "", spec.Caps, taskID, spec)
 		return runner, nil
+	case "fsharp", "fsharp-constrained":
+		return &FSharpRunner{spec: spec}, nil
 	default:
 		return nil, fmt.Errorf("unsupported language: %s", lang)
 	}

@@ -406,6 +406,7 @@ func runEvalSuite() {
 					if *skipExisting {
 						// Result filename format: benchmarkID_lang_model_timestamp.json
 						// Check in appropriate subdirectory based on eval mode and condition
+						sanitizedModel := eval_harness.SanitizeModelForFilename(model)
 						var patterns []string
 						modeDir := "standard"
 						if *agent {
@@ -413,13 +414,13 @@ func runEvalSuite() {
 						}
 						if condition != "" {
 							// With conditions: check mode/condition/ subdirectory
-							patterns = append(patterns, filepath.Join(*outputDir, modeDir, condition, fmt.Sprintf("%s_%s_%s_*.json", benchmark, lang, model)))
+							patterns = append(patterns, filepath.Join(*outputDir, modeDir, condition, fmt.Sprintf("%s_%s_%s_*.json", benchmark, lang, sanitizedModel)))
 						} else {
 							// Legacy: check mode/ subdirectory
-							patterns = append(patterns, filepath.Join(*outputDir, modeDir, fmt.Sprintf("%s_%s_%s_*.json", benchmark, lang, model)))
+							patterns = append(patterns, filepath.Join(*outputDir, modeDir, fmt.Sprintf("%s_%s_%s_*.json", benchmark, lang, sanitizedModel)))
 						}
 						// Also check root directory for legacy results
-						patterns = append(patterns, filepath.Join(*outputDir, fmt.Sprintf("%s_%s_%s_*.json", benchmark, lang, model)))
+						patterns = append(patterns, filepath.Join(*outputDir, fmt.Sprintf("%s_%s_%s_*.json", benchmark, lang, sanitizedModel)))
 
 						foundExisting := false
 						for _, pattern := range patterns {

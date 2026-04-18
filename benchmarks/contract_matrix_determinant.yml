@@ -2,7 +2,7 @@ id: contract_matrix_determinant
 description: "Matrix determinant via cofactor expansion — recursive with structural invariants on minors"
 difficulty: hard
 category: algorithm_from_spec
-languages: ["ailang", "python"]
+languages: ["ailang", "python", "fsharp"]
 entrypoint: "main"
 caps: ["IO"]
 

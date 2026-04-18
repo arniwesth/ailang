@@ -1,6 +1,6 @@
 id: no_runtime_crashes_option
 description: "Total functions: Option type prevents null pointer errors"
-languages: ["python", "ailang"]
+languages: ["python", "ailang", "fsharp"]
 entrypoint: "main"
 caps: ["IO"]
 difficulty: "medium"

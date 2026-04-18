@@ -5,6 +5,7 @@ package eval_harness
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/sunholo/ailang/internal/ai/ollama"
 	"github.com/sunholo/ailang/internal/ai/openai"
 )
+
+const defaultOpenAIBaseURL = "https://api.openai.com/v1"
 
 // providerAdapter wraps ai.Provider for eval harness use.
 type providerAdapter struct {
@@ -28,7 +31,18 @@ func newProviderAdapter(model string, apiKey string) (*providerAdapter, error) {
 	var provider ai.Provider
 	switch providerType {
 	case "openai":
-		provider = openai.NewClient(apiKey)
+		baseURL, err := resolveOpenAIBaseURLFromEnv()
+		if err != nil {
+			return nil, err
+		}
+		// Allow forcing provider path via model prefix (e.g. "openai/google/gemma-..."),
+		// while still passing a bare API model ID to the upstream endpoint.
+		model = strings.TrimPrefix(model, "openai/")
+		if baseURL == defaultOpenAIBaseURL {
+			provider = openai.NewClient(apiKey)
+		} else {
+			provider = openai.NewClient(apiKey, openai.WithBaseURL(baseURL))
+		}
 	case "anthropic":
 		provider = anthropic.NewClient(apiKey)
 	case "google":
@@ -55,6 +69,50 @@ func newProviderAdapter(model string, apiKey string) (*providerAdapter, error) {
 		provider: provider,
 		model:    model,
 	}, nil
+}
+
+func normalizeOpenAIBaseURL(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", fmt.Errorf("empty URL")
+	}
+
+	u, err := url.Parse(s)
+	if err != nil {
+		return "", fmt.Errorf("parse URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("URL must start with http:// or https://")
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("URL must include host")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("URL must not contain query parameters or fragments")
+	}
+
+	path := strings.TrimRight(u.Path, "/")
+	if path == "" {
+		path = "/v1"
+	} else if !strings.HasSuffix(path, "/v1") {
+		path += "/v1"
+	}
+	u.Path = path
+
+	return u.String(), nil
+}
+
+func resolveOpenAIBaseURLFromEnv() (string, error) {
+	raw := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+	if raw == "" {
+		return defaultOpenAIBaseURL, nil
+	}
+
+	normalized, err := normalizeOpenAIBaseURL(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid OPENAI_BASE_URL: %w", err)
+	}
+	return normalized, nil
 }
 
 // generate calls the unified provider and converts to GenerateResult.
@@ -142,6 +200,10 @@ func getAPIKeyForProvider(provider string, model string) (string, error) {
 	}
 
 	key := os.Getenv(envVar)
+	if provider == "openai" && strings.TrimSpace(os.Getenv("OPENAI_BASE_URL")) != "" && key == "" {
+		// Custom OpenAI-compatible endpoints may not require authentication.
+		return "", nil
+	}
 	if key == "" {
 		return "", fmt.Errorf("%s environment variable not set (required for model: %s)", envVar, model)
 	}
