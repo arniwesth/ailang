@@ -70,29 +70,18 @@ func (r *Runner) runTest(testCase TestCase) TestResult {
 			return result
 		}
 
-		// Check if function has cross-function dependencies
-		// If so, use cluster evaluation to include all dependencies
+		// motoko:begin
 		var actualsTuple *eval.TupleValue
-		cluster, coreProg, clusterErr := r.executor.ExtractPureClusterForFunction(testCase.FunctionCtx, r.executor.sourceFile)
-		if clusterErr == nil && cluster != nil && cluster.HasDependencies() {
-			// Function has dependencies - use cluster harness
-			actualsTuple, err = r.executor.EvaluateInlineTestsWithCluster(testCase.FunctionCtx, []TestCase{testCase}, coreProg)
-			if err != nil {
-				result.Status = StatusFail
-				result.Error = fmt.Sprintf("cluster harness evaluation failed: %v", err)
-				result.Duration = time.Since(start)
-				return result
-			}
-		} else {
-			// No dependencies or cluster extraction failed - use single-binding harness
-			actualsTuple, err = r.executor.EvaluateInlineTestsWithHarness(*binding, []TestCase{testCase})
-			if err != nil {
-				result.Status = StatusFail
-				result.Error = fmt.Sprintf("harness evaluation failed: %v", err)
-				result.Duration = time.Since(start)
-				return result
-			}
+		// Use the stable single-binding harness path.
+		// Dependencies are resolved from injected module bindings in the executor.
+		actualsTuple, err = r.executor.EvaluateInlineTestsWithHarness(*binding, []TestCase{testCase})
+		if err != nil {
+			result.Status = StatusFail
+			result.Error = fmt.Sprintf("harness evaluation failed: %v", err)
+			result.Duration = time.Since(start)
+			return result
 		}
+		// motoko:endtoto
 
 		// Compare each actual to expected
 		for i, expr := range testCase.Body {
@@ -137,8 +126,7 @@ func (r *Runner) runTest(testCase TestCase) TestResult {
 		// All tests passed
 		result.Status = StatusPass
 	} else {
-		// Non-inline tests (test "name" { ... } blocks)
-		// For now, skip these - they're less common
+		// Named test blocks: not yet implemented, skip
 		result.Status = StatusSkip
 		result.Error = "Named test blocks not yet implemented"
 	}

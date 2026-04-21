@@ -70,6 +70,11 @@ func (c *Client) Generate(ctx context.Context, req *ai.Request) (*ai.Response, e
 	if ai.RequestsImage(req) {
 		return nil, ai.NewProviderError("openai", 0, "image generation not supported by provider \"openai\" (model: "+req.Model+") — use a Gemini image model", nil)
 	}
+	// motoko:begin
+	if err := applyModelRoutingMotoko(&c, &req); err != nil {
+		return nil, err
+	}
+	// motoko:end
 	apiType := c.detectAPIType(req.Model)
 
 	// Start OTEL span

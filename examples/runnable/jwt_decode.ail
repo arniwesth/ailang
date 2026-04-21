@@ -16,12 +16,17 @@ export func main() -> () ! {IO} = {
   match decodeJWT(token) {
     Err(e) => println("Decode error: ${e}"),
     Ok(jwt) => {
+      let subject = show(getString(jwt.payload, "sub"));
+      let name = show(getString(jwt.payload, "name"));
+      let expired = show(isExpired(jwt.payload, 1700000000));
+      let issuerOk = show(checkIssuer(jwt.payload, "https://example.com"));
+      let audienceOk = show(checkAudience(jwt.payload, "my-app"));
       println("JWT decoded successfully!");
-      println("Subject: ${show(getString(jwt.payload, "sub"))}");
-      println("Name: ${show(getString(jwt.payload, "name"))}");
-      println("Expired at 1700000000: ${show(isExpired(jwt.payload, 1700000000))}");
-      println("Issuer matches: ${show(checkIssuer(jwt.payload, "https://example.com"))}");
-      println("Audience matches: ${show(checkAudience(jwt.payload, "my-app"))}")
+      println("Subject: ${subject}");
+      println("Name: ${name}");
+      println("Expired at 1700000000: ${expired}");
+      println("Issuer matches: ${issuerOk}");
+      println("Audience matches: ${audienceOk}")
     }
   }
 }

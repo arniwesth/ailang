@@ -1,0 +1,58 @@
+module std/ai_motoko
+
+import std/result (Result, Ok, Err)
+
+export type AIError = {
+  message: string,
+  provider: string,
+  statusCode: int,
+  retryable: bool,
+  code: string
+}
+
+export type AIStreamChunk = {
+  seq: int,
+  text_delta: string
+}
+
+export type AIStreamResult = {
+  ok: bool,
+  output: string,
+  error_message: string,
+  provider: string,
+  status_code: int,
+  retryable: bool,
+  error_code: string,
+  chunks: [AIStreamChunk],
+  streamed: bool,
+  stream_truncated: bool
+}
+
+export func callResult(input: string) -> Result[string, AIError] ! {AI} {
+  let r = _ai_call_result(input);
+  if r.ok
+  then Ok(r.output)
+  else Err({
+    message: r.error_message,
+    provider: r.provider,
+    statusCode: r.status_code,
+    retryable: r.retryable,
+    code: r.error_code
+  })
+}
+
+export func callJsonResult(input: string, schema: string) -> Result[string, AIError] ! {AI} {
+  let r = _ai_call_json_result(input, schema);
+  if r.ok
+  then Ok(r.output)
+  else Err({
+    message: r.error_message,
+    provider: r.provider,
+    statusCode: r.status_code,
+    retryable: r.retryable,
+    code: r.error_code
+  })
+}
+
+export func callStreamResult(input: string, step: int, stream_id: string, model: string) -> AIStreamResult ! {AI} =
+  _ai_call_stream_result(input, step, stream_id, model)

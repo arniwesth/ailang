@@ -169,6 +169,9 @@ func init() {
 	RegisterOp("AI", "callJsonSimple", aiCallJsonSimple)
 	RegisterOp("AI", "callImage", aiCallImage)
 	RegisterOp("AI", "callImageBase64", aiCallImageBase64)
+	// motoko:begin
+	registerAIMotokoOps()
+	// motoko:end
 }
 
 // aiCall implements AI.call(input: string) -> string

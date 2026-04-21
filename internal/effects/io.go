@@ -15,6 +15,9 @@ func init() {
 	RegisterOp("IO", "readLine", ioReadLine)
 	RegisterOp("IO", "writeBytes", ioWriteBytes)
 	RegisterOp("IO", "exit", ioExit)
+	// motoko:begin
+	registerIOMotokoOps()
+	// motoko:end
 }
 
 // ioPrint implements IO.print(s: String) -> ()

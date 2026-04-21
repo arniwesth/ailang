@@ -12,6 +12,9 @@ func init() {
 	registerAICallJsonSimple()
 	registerAICallImage()
 	registerAICallImageBase64()
+	// motoko:begin
+	registerAIMotokoBuiltins()
+	// motoko:end
 }
 
 // _ai_call: Call the AI oracle with a string input

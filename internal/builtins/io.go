@@ -20,6 +20,10 @@ func init() {
 // ============================================================================
 
 func registerIO() {
+	// motoko:begin
+	registerIOMotokoBuiltins()
+	// motoko:end
+
 	// NOTE: 'print' is NOT registered here - it's entry-module prelude only
 	// See internal/pipeline/prelude.go for prelude injection
 	// Libraries must use explicit 'import std/io (_io_println)'

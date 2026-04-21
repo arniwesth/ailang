@@ -3,6 +3,7 @@ package pipeline
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -10,10 +11,9 @@ import (
 // TestJWT_DecodeExample runs the jwt_decode.ail example through the full pipeline
 // and verifies correct output.
 func TestJWT_DecodeExample(t *testing.T) {
-	// Find ailang binary
-	binary, err := exec.LookPath("ailang")
+	binary, err := resolveAilangBinary(t)
 	if err != nil {
-		t.Skip("ailang binary not found in PATH; skipping integration test")
+		t.Skip("ailang binary not available; skipping integration test")
 	}
 
 	cmd := exec.Command(binary, "run", "--caps", "IO", "--entry", "main",
@@ -46,9 +46,9 @@ func TestJWT_DecodeExample(t *testing.T) {
 
 // TestJWT_DecodeInvalidToken verifies that decodeJWT returns Err for malformed tokens.
 func TestJWT_DecodeInvalidToken(t *testing.T) {
-	binary, err := exec.LookPath("ailang")
+	binary, err := resolveAilangBinary(t)
 	if err != nil {
-		t.Skip("ailang binary not found in PATH; skipping integration test")
+		t.Skip("ailang binary not available; skipping integration test")
 	}
 
 	// Create a temporary test file that tries to decode an invalid JWT
@@ -110,4 +110,14 @@ func findProjectRoot(t *testing.T) string {
 	}
 	t.Fatal("could not find project root (go.mod)")
 	return ""
+}
+
+func resolveAilangBinary(t *testing.T) (string, error) {
+	t.Helper()
+	root := findProjectRoot(t)
+	local := filepath.Join(root, "bin", "ailang")
+	if st, err := os.Stat(local); err == nil && !st.IsDir() {
+		return local, nil
+	}
+	return exec.LookPath("ailang")
 }

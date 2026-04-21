@@ -258,10 +258,6 @@ func typeCheckAndLowerModule(
 		}
 	}
 
-	// M-PERF-DOCPARSE: Apply all deferred CoreTI substitutions in one pass
-	// Must happen before FillOperatorMethods which reads CoreTI for operator resolution
-	typeChecker.FinalizeSubstitutions()
-
 	// Fill operator methods (resolve operators to type class methods)
 	// This populates the Method field in resolved constraints before lowering
 	for _, decl := range unit.Core.Decls {
@@ -604,9 +600,6 @@ func collectTConNames(t types.Type, names map[string]bool) {
 		collectTConNames(ty.Element, names)
 	case *types.TArray:
 		collectTConNames(ty.Element, names)
-	case *types.TMap:
-		collectTConNames(ty.Key, names)
-		collectTConNames(ty.Value, names)
 	case *types.TTuple:
 		for _, e := range ty.Elements {
 			collectTConNames(e, names)
@@ -643,11 +636,31 @@ func assembleModuleResult(
 			}
 		}
 
-		// Initialize empty maps for compatibility with loader interface
-		// (The actual export/type/constructor information is in the Iface)
+		// motoko:begin
+		// Populate exports from surface AST
 		loaded.Exports = make(map[string]*ast.FuncDecl)
+		if unit.Surface != nil {
+			for _, decl := range unit.Surface.Decls {
+				if fn, ok := decl.(*ast.FuncDecl); ok && fn.IsExport {
+					loaded.Exports[fn.Name] = fn
+				}
+			}
+		}
+
+		// Populate types and constructors from surface AST and compile unit
 		loaded.Types = make(map[string]*ast.TypeDecl)
+		if unit.Surface != nil {
+			for _, decl := range unit.Surface.Decls {
+				if td, ok := decl.(*ast.TypeDecl); ok {
+					loaded.Types[td.Name] = td
+				}
+			}
+		}
 		loaded.Constructors = make(map[string]string)
+		for ctorName, ctorInfo := range unit.Constructors {
+			loaded.Constructors[ctorName] = ctorInfo.TypeName
+		}
+		// motoko:endtoto
 
 		modules[modID] = loaded
 	}

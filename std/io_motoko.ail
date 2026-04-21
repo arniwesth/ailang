@@ -1,0 +1,9 @@
+-- std/io_motoko - Motoko-specific non-blocking stdin helpers
+--
+-- Requires: IO capability (--caps IO)
+
+module std/io_motoko
+
+-- pollStdin: Non-blocking stdin poll
+-- Returns one buffered line when newline-terminated input is available, else ""
+export func pollStdin() -> string ! {IO} = _io_poll_stdin()
