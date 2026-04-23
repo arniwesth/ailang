@@ -236,7 +236,9 @@ func emitMotokoStreamEvent(ctx *EffContext, typ string, fields map[string]any) {
 	if err != nil {
 		return
 	}
-	_, _ = fmt.Fprintln(ctx.GetIOWriter(), string(b))
+	w := ctx.GetIOWriter()
+	_, _ = fmt.Fprintln(w, string(b))
+	flushIfPossible(w)
 }
 
 func pollBufferedAbortMotoko(ctx *EffContext) bool {

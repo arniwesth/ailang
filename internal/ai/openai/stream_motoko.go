@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sunholo/ailang/internal/ai"
 )
@@ -95,7 +98,14 @@ func (c *Client) generateChatStreamMotoko(ctx context.Context, req *ai.Request, 
 		return nil, ai.NewProviderError("openai", 0, "failed to marshal stream request", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/chat/completions", bytes.NewReader(jsonBody))
+	timeoutSec := parseEnvIntOpenAIMotoko("OPENAI_STREAM_TIMEOUT_SEC", 120)
+	if timeoutSec <= 0 {
+		timeoutSec = 120
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(reqCtx, "POST", c.baseURL+"/chat/completions", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, ai.NewProviderError("openai", 0, "failed to create stream request", err)
 	}
@@ -129,9 +139,13 @@ func (c *Client) generateChatStreamMotoko(ctx context.Context, req *ai.Request, 
 		if chunk.Model != "" {
 			streamModel = chunk.Model
 		}
+		sawFinish := false
 		for _, choice := range chunk.Choices {
 			delta := choice.Delta.Content
 			if delta == "" {
+				if choice.FinishReason != "" {
+					sawFinish = true
+				}
 				continue
 			}
 			textBuilder.WriteString(delta)
@@ -142,6 +156,14 @@ func (c *Client) generateChatStreamMotoko(ctx context.Context, req *ai.Request, 
 				}
 			}
 			seq++
+			if choice.FinishReason != "" {
+				sawFinish = true
+			}
+		}
+		// Some OpenAI-compatible servers emit finish_reason but omit [DONE].
+		// Treat finish_reason as terminal to avoid waiting on an open socket forever.
+		if sawFinish {
+			return io.EOF
 		}
 		return nil
 	})
@@ -201,4 +223,16 @@ func readSSEDataMotoko(body io.Reader, onData func(string) error) error {
 		return err
 	}
 	return nil
+}
+
+func parseEnvIntOpenAIMotoko(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return n
 }

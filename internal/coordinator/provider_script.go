@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -125,14 +124,12 @@ func (p *ScriptProvider) Execute(ctx context.Context, task *AnalyzedTask, opts *
 		}
 	}
 
-	// Create context with timeout.
-	// We manually manage process lifetime so child processes can be killed as a group.
+	// Create context with timeout
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	// Create command
-	cmd := exec.Command(shell, "-c", invoke.Command)
-	SetProcessGroup(cmd)
+	cmd := exec.CommandContext(ctx, shell, "-c", invoke.Command)
 	cmd.Env = env
 
 	// Set working directory
@@ -167,28 +164,8 @@ func (p *ScriptProvider) Execute(ctx context.Context, task *AnalyzedTask, opts *
 		cmd.Stderr = &stderr
 	}
 
-	// Execute the command with explicit timeout/cancellation handling.
-	if err := cmd.Start(); err != nil {
-		return &ExecuteResult{
-			Provider: "script",
-			Success:  false,
-			Duration: time.Since(startTime),
-			Error:    err.Error(),
-		}, nil
-	}
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	var err error
-	select {
-	case err = <-done:
-	case <-ctx.Done():
-		_ = KillProcessGroup(cmd.Process.Pid)
-		<-done
-		err = ctx.Err()
-	}
+	// Execute the command
+	err := cmd.Run()
 	duration := time.Since(startTime)
 
 	// Build result
@@ -203,14 +180,9 @@ func (p *ScriptProvider) Execute(ctx context.Context, task *AnalyzedTask, opts *
 	}
 
 	// Check for errors
-	if errors.Is(err, context.DeadlineExceeded) {
+	if ctx.Err() == context.DeadlineExceeded {
 		result.Success = false
 		result.Error = fmt.Sprintf("script timed out after %v", timeout)
-		return result, nil
-	}
-	if errors.Is(err, context.Canceled) {
-		result.Success = false
-		result.Error = "script cancelled"
 		return result, nil
 	}
 

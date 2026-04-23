@@ -7,20 +7,13 @@ import (
 	"time"
 )
 
-func requireUV(t *testing.T) {
-	t.Helper()
-	_, err := newPythonCommand("-V")
-	if err == nil {
-		return
-	}
-	if _, ok := err.(*ErrUvMissing); ok {
-		t.Skip(err.Error())
-	}
-	t.Fatalf("unexpected python runtime setup error: %v", err)
-}
-
 func TestPythonRunner(t *testing.T) {
-	requireUV(t)
+	// Skip if Python is not available (e.g., Windows CI)
+	if _, err := exec.LookPath("python3"); err != nil {
+		if _, err := exec.LookPath("python"); err != nil {
+			t.Skip("python not available, skipping")
+		}
+	}
 
 	runner := NewPythonRunner()
 
@@ -50,7 +43,6 @@ func TestPythonRunner(t *testing.T) {
 }
 
 func TestPythonRunner_Error(t *testing.T) {
-	requireUV(t)
 	runner := NewPythonRunner()
 
 	// Test syntax error
@@ -70,7 +62,6 @@ func TestPythonRunner_Error(t *testing.T) {
 }
 
 func TestPythonRunner_Timeout(t *testing.T) {
-	requireUV(t)
 	runner := NewPythonRunner()
 
 	// Test timeout (sleep for longer than timeout)
@@ -131,12 +122,12 @@ type Option[a] = Some(a) | None
 export func main() -> () ! {IO} {
   let x: Option[int] = Some(42);
   match x {
-    Some(v) => println(show(v)),
+    Some(v) => println("Got: ${show(v)}"),
     None => println("Nothing")
   };
   let y: Option[int] = None;
   match y {
-    Some(v) => println(show(v)),
+    Some(v) => println("Got: ${show(v)}"),
     None => println("Empty")
   }
 }
@@ -144,7 +135,7 @@ export func main() -> () ! {IO} {
 	spec := &BenchmarkSpec{
 		ID:          "adt_validation_test",
 		Caps:        []string{"IO"},
-		ExpectedOut: "42\nEmpty\n",
+		ExpectedOut: "Got: 42\nEmpty\n",
 	}
 
 	// Use short timeout — trivial programs should compile+run in <2s

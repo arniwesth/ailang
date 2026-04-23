@@ -2,7 +2,7 @@
 # CODE HEALTH & ORGANIZATION TARGETS
 # =============================================================================
 
-.PHONY: check-file-sizes report-file-sizes codebase-health largest-files
+.PHONY: check-file-sizes report-file-sizes codebase-health largest-files verify-fork-surface
 .PHONY: fmt fmt-check vet lint install-lint
 
 # Code formatting
@@ -127,3 +127,6 @@ largest-files: ## Show 20 largest files
 	@echo "$(BOLD)=== 20 Largest Files ===$(RESET)"
 	@find internal cmd -name "*.go" -exec wc -l {} \; | sort -rn | head -20 | \
 		awk '{printf "%4d lines: %s\n", $$1, $$2}'
+
+verify-fork-surface: ## Verify Motoko fork surface constraints against FORK_BASE_TAG (default v0.13.0)
+	@bash scripts/verify_fork_surface.sh $${FORK_BASE_TAG:-v0.13.0}

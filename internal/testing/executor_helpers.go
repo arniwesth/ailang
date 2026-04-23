@@ -79,7 +79,7 @@ func (r *CombinedResolver) ResolveValue(ref core.GlobalRef) (eval.Value, error) 
 		}
 		return nil, fmt.Errorf("failed to resolve global $adt.%s: constructor %s.%s not found", ref.Name, typeName, ctorName)
 	}
-	// motoko:endtoto
+	// motoko:end
 
 	// Case 1: Builtin references (module="$builtin" or name starts with "_")
 	if ref.Module == "$builtin" || strings.HasPrefix(ref.Name, "_") {
@@ -102,7 +102,7 @@ func (r *CombinedResolver) ResolveValue(ref core.GlobalRef) (eval.Value, error) 
 		if val, ok := r.Env.Get(qualifiedKey); ok {
 			return val, nil
 		}
-		// motoko:endtoto
+		// motoko:end
 		// Look for the function in the specified module
 		if mod, ok := r.Modules[ref.Module]; ok && mod != nil {
 			// Try to find the function in the module's Core program
@@ -364,7 +364,7 @@ func (e *Executor) injectADTConstructors(evaluator *eval.CoreEvaluator) {
 			}
 		}
 	}
-	// motoko:endtoto
+	// motoko:end
 }
 
 // injectModuleBindings evaluates all module Core programs and injects their bindings
@@ -393,7 +393,7 @@ func (e *Executor) injectModuleBindings(evaluator *eval.CoreEvaluator, env *eval
 		modulePath string
 		lambda     *core.Lambda
 	}
-	// motoko:endtoto
+	// motoko:end
 	var pendingLambdas []PendingLambdaBinding
 
 	for _, mod := range e.modules {
@@ -406,6 +406,7 @@ func (e *Executor) injectModuleBindings(evaluator *eval.CoreEvaluator, env *eval
 			switch d := decl.(type) {
 			case *core.Let:
 				// For pure functions, the value is a Lambda - queue it for Pass 2
+				// motoko:begin
 				if lambda, ok := d.Value.(*core.Lambda); ok {
 					pendingLambdas = append(pendingLambdas, PendingLambdaBinding{
 						name:       d.Name,
@@ -413,6 +414,7 @@ func (e *Executor) injectModuleBindings(evaluator *eval.CoreEvaluator, env *eval
 						lambda:     lambda,
 					})
 				} else if _, ok := d.Value.(*core.VarGlobal); ok {
+					// motoko:end
 					// This is a re-export of another module's function
 					// We need to evaluate it to get the actual function value
 					val, err := evaluator.Eval(d.Value)
@@ -420,13 +422,14 @@ func (e *Executor) injectModuleBindings(evaluator *eval.CoreEvaluator, env *eval
 						env.Set(d.Name, val)
 						// motoko:begin
 						env.Set(mod.Path+"."+d.Name, val)
-						// motoko:endtoto
+						// motoko:end
 					}
 				}
 
 			case *core.LetRec:
 				// For recursive bindings, queue the lambdas for Pass 2
 				for _, binding := range d.Bindings {
+					// motoko:begin
 					if lambda, ok := binding.Value.(*core.Lambda); ok {
 						pendingLambdas = append(pendingLambdas, PendingLambdaBinding{
 							name:       binding.Name,
@@ -434,6 +437,7 @@ func (e *Executor) injectModuleBindings(evaluator *eval.CoreEvaluator, env *eval
 							lambda:     lambda,
 						})
 					}
+					// motoko:end
 				}
 			}
 		}
@@ -445,7 +449,7 @@ func (e *Executor) injectModuleBindings(evaluator *eval.CoreEvaluator, env *eval
 	// Store under both unqualified name and module-qualified name to avoid
 	// collisions between modules that export same-named functions (e.g.,
 	// std/string.length vs std/list.length).
-	// motoko:endtoto
+	// motoko:end
 	for _, pending := range pendingLambdas {
 		funcVal := &eval.FunctionValue{
 			Params: extractLambdaParams(pending.lambda),
@@ -458,6 +462,6 @@ func (e *Executor) injectModuleBindings(evaluator *eval.CoreEvaluator, env *eval
 		if pending.modulePath != "" {
 			env.Set(pending.modulePath+"."+pending.name, funcVal)
 		}
-		// motoko:endtoto
+		// motoko:end
 	}
 }

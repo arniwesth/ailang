@@ -10,10 +10,7 @@ _ai_call : string -> string ! {AI}
 _ai_call_image : (string, string, string) -> string ! {AI}
 _ai_call_image_base64 : (string, string) -> string ! {AI}
 _ai_call_json : (string, string) -> string ! {AI}
-_ai_call_json_result : (string, string) -> {error_code: string, error_message: string, ok: bool, output: string, provider: string, retryable: bool, status_code: int} ! {AI}
 _ai_call_json_simple : string -> string ! {AI}
-_ai_call_result : string -> {error_code: string, error_message: string, ok: bool, output: string, provider: string, retryable: bool, status_code: int} ! {AI}
-_ai_call_stream_result : (string, int, string, string) -> {chunks: list[{seq: int, text_delta: string}], error_code: string, error_message: string, ok: bool, output: string, provider: string, retryable: bool, status_code: int, stream_truncated: bool, streamed: bool} ! {AI}
 _array_append : (Array[a], a) -> Array[a]
 _array_empty : () -> Array[a]
 _array_from_list : list[a] -> Array[a]
@@ -85,7 +82,6 @@ _hamming_distance : (int, int) -> int
 _has_header : (a, string) -> bool
 _int_to_float : int -> float
 _io_exit : int -> () ! {IO}
-_io_poll_stdin : () -> string ! {IO}
 _io_print : string -> () ! {IO}
 _io_println : string -> () ! {IO}
 _io_readLine : () -> string ! {IO}

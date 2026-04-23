@@ -298,16 +298,14 @@ func TestIntegration_WorktreeManager(t *testing.T) {
 	// Record initial count (may have existing worktrees from other tests/runs)
 	initialCount := mgr.Count()
 
-	taskID := "test-task-integ-" + strings.ReplaceAll(time.Now().Format("150405.000000000"), ".", "")
-
 	// Create a worktree from the current branch (not hardcoded 'main')
-	wt, err := mgr.CreateWorktree(taskID, currentBranch)
+	wt, err := mgr.CreateWorktree("test-task-integ-1", currentBranch)
 	if err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}
 
-	if wt.TaskID != taskID {
-		t.Errorf("expected task ID %s, got %s", taskID, wt.TaskID)
+	if wt.TaskID != "test-task-integ-1" {
+		t.Errorf("expected task ID test-task-integ-1, got %s", wt.TaskID)
 	}
 
 	// Verify directory exists
@@ -321,16 +319,16 @@ func TestIntegration_WorktreeManager(t *testing.T) {
 	}
 
 	// Get the worktree we created
-	retrieved, found := mgr.GetWorktree(taskID)
+	retrieved, found := mgr.GetWorktree("test-task-integ-1")
 	if !found {
-		t.Errorf("expected to find worktree %s", taskID)
+		t.Error("expected to find worktree test-task-integ-1")
 	}
-	if retrieved.TaskID != taskID {
-		t.Errorf("expected task ID %s, got %s", taskID, retrieved.TaskID)
+	if retrieved.TaskID != "test-task-integ-1" {
+		t.Errorf("expected task ID test-task-integ-1, got %s", retrieved.TaskID)
 	}
 
 	// Remove worktree
-	if err := mgr.RemoveWorktree(taskID); err != nil {
+	if err := mgr.RemoveWorktree("test-task-integ-1"); err != nil {
 		t.Fatalf("failed to remove worktree: %v", err)
 	}
 

@@ -8,6 +8,15 @@ import (
 	"github.com/sunholo/ailang/internal/eval"
 )
 
+// motoko:begin
+func flushIfPossible(w io.Writer) {
+	type flusher interface{ Flush() error }
+	if f, ok := w.(flusher); ok {
+		_ = f.Flush()
+	}
+}
+// motoko:end
+
 // init registers IO effect operations
 func init() {
 	RegisterOp("IO", "print", ioPrint)
@@ -45,7 +54,11 @@ func ioPrint(ctx *EffContext, args []eval.Value) (eval.Value, error) {
 		return nil, fmt.Errorf("print: expected String, got %T", args[0])
 	}
 
-	fmt.Fprint(ctx.GetIOWriter(), str.Value)
+	// motoko:begin
+	w := ctx.GetIOWriter()
+	fmt.Fprint(w, str.Value)
+	flushIfPossible(w)
+	// motoko:end
 	return &eval.UnitValue{}, nil
 }
 
@@ -74,7 +87,11 @@ func ioPrintln(ctx *EffContext, args []eval.Value) (eval.Value, error) {
 		return nil, fmt.Errorf("println: expected String, got %T", args[0])
 	}
 
-	fmt.Fprintln(ctx.GetIOWriter(), str.Value)
+	// motoko:begin
+	w := ctx.GetIOWriter()
+	fmt.Fprintln(w, str.Value)
+	flushIfPossible(w)
+	// motoko:end
 	return &eval.UnitValue{}, nil
 }
 
@@ -174,6 +191,9 @@ func ioWriteBytes(ctx *EffContext, args []eval.Value) (eval.Value, error) {
 	if _, err := ctx.GetIOWriter().Write(bytesVal.Value); err != nil {
 		return nil, fmt.Errorf("writeBytes: %w", err)
 	}
+	// motoko:begin
+	flushIfPossible(ctx.GetIOWriter())
+	// motoko:end
 
 	return &eval.UnitValue{}, nil
 }

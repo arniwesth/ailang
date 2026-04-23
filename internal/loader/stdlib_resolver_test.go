@@ -402,6 +402,34 @@ func TestStdlibResolver_ResolveStdlib(t *testing.T) {
 			t.Errorf("expected 'version mismatch' error, got: %v", err)
 		}
 	})
+
+		// motoko:begin
+	t.Run("git-describe binary version matches release stdlib version in strict mode", func(t *testing.T) {
+		dir := filepath.Join(tmpDir, "describe_compatible")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("failed to create describe-compatible dir: %v", err)
+		}
+		ioPath := filepath.Join(dir, "io.ail")
+		if err := os.WriteFile(ioPath, []byte("export func println() { }"), 0644); err != nil {
+			t.Fatalf("failed to create module: %v", err)
+		}
+		versionPath := filepath.Join(dir, "VERSION")
+		if err := os.WriteFile(versionPath, []byte("v0.13.0\n"), 0644); err != nil {
+			t.Fatalf("failed to create VERSION: %v", err)
+		}
+
+		resolver := NewStdlibResolver(dir, false, true) // strict mode
+		resolver.expectedVersion = "v0.13.0-2-g5a89c92a-dirty"
+
+		got, err := resolver.ResolveStdlib("io")
+		if err != nil {
+			t.Fatalf("expected no error for compatible git-describe version, got: %v", err)
+		}
+		if got != ioPath {
+			t.Errorf("expected path %q, got %q", ioPath, got)
+		}
+	})
+		// motoko:end
 }
 
 func TestStdlibResolver_SearchPathOrder(t *testing.T) {

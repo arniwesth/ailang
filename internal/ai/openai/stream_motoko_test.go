@@ -8,9 +8,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/sunholo/ailang/internal/ai"
 	"github.com/stretchr/testify/require"
+	"github.com/sunholo/ailang/internal/ai"
 )
 
 func TestReadSSEDataMotoko(t *testing.T) {
@@ -77,4 +78,28 @@ func TestGenerateStreamMotoko_AbortFromHandler(t *testing.T) {
 		return nil
 	})
 	require.ErrorIs(t, err, errAbort)
+}
+
+func TestGenerateStreamMotoko_FinishReasonWithoutDone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if f, ok := w.(http.Flusher); ok {
+			_, _ = io.WriteString(w, "data: {\"model\":\"gpt-4o-mini\",\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n")
+			f.Flush()
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"\"},\"finish_reason\":\"stop\"}]}\n\n")
+			f.Flush()
+			time.Sleep(2 * time.Second)
+			return
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", WithBaseURL(server.URL))
+	start := time.Now()
+	resp, err := client.GenerateStream(context.Background(), &ai.Request{Model: "gpt-4o-mini", UserPrompt: "x"}, nil)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	require.Equal(t, "hi", resp.Text)
+	require.Less(t, elapsed, 1500*time.Millisecond)
 }

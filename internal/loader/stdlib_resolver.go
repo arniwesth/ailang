@@ -18,6 +18,10 @@ var BinaryVersion = "dev"
 // M-DX21: Show warning only once per process to reduce noise
 var stdlibVersionWarningShown bool
 
+// motoko:begin
+var gitDescribeVersionPattern = regexp.MustCompile(`^(.+)-\d+-g[0-9a-f]+(?:-dirty)?$`)
+// motoko:end
+
 // validateModuleName validates a stdlib module name for security
 // Prevents directory traversal and other attacks
 func validateModuleName(name string) error {
@@ -299,13 +303,37 @@ func (r *StdlibResolver) checkStdlibVersion(stdlibRoot string) error {
 	}
 
 	version := strings.TrimSpace(string(content))
-	if version != r.expectedVersion {
+	// motoko:begin
+	if !versionsCompatible(r.expectedVersion, version) {
+	// motoko:end
 		return fmt.Errorf("stdlib version mismatch: expected %s, found %s at %s",
 			r.expectedVersion, version, stdlibRoot)
 	}
 
 	return nil
 }
+
+// motoko:begin
+func versionsCompatible(expected, found string) bool {
+	expected = strings.TrimSpace(expected)
+	found = strings.TrimSpace(found)
+	if expected == found {
+		return true
+	}
+	// Accept git-describe binary versions like v0.13.0-2-gabc1234[-dirty]
+	// as compatible with a stdlib VERSION pinned to the release tag v0.13.0.
+	return canonicalVersion(expected) == canonicalVersion(found)
+}
+
+func canonicalVersion(v string) string {
+	v = strings.TrimSpace(v)
+	m := gitDescribeVersionPattern.FindStringSubmatch(v)
+	if len(m) == 2 {
+		return m[1]
+	}
+	return v
+}
+// motoko:end
 
 // errWithSearchTrace returns a detailed error with search trace
 func (r *StdlibResolver) errWithSearchTrace(moduleName string, triedPaths []string) error {

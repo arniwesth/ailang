@@ -116,6 +116,11 @@ func TestGuessProvider(t *testing.T) {
 		{"o1-preview", ProviderOpenAI},
 		{"o3-mini", ProviderOpenAI},
 		{"codex-max", ProviderOpenAI},
+		// motoko:begin
+		{"openrouter/moonshotai/kimi-k2.6", ProviderOpenAI},
+		{"openrouter/openai/gpt-4o-mini", ProviderOpenAI},
+		{"openai/google/gemma-4-26b-a4b-it", ProviderOpenAI},
+		// motoko:end
 
 		// Anthropic models
 		{"claude-sonnet-4-5", ProviderAnthropic},

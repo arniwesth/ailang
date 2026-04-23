@@ -33,6 +33,11 @@ func GuessProvider(modelName string) ProviderType {
 	if strings.HasPrefix(lower, "ollama:") {
 		return ProviderOllama
 	}
+	// motoko:begin
+	if strings.HasPrefix(lower, "openrouter/") || strings.HasPrefix(lower, "openai/") {
+		return ProviderOpenAI
+	}
+	// motoko:end
 
 	// Check prefixes
 	switch {

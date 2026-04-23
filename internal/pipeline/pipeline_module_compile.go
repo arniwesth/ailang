@@ -660,7 +660,7 @@ func assembleModuleResult(
 		for ctorName, ctorInfo := range unit.Constructors {
 			loaded.Constructors[ctorName] = ctorInfo.TypeName
 		}
-		// motoko:endtoto
+		// motoko:end
 
 		modules[modID] = loaded
 	}

@@ -21,6 +21,21 @@ import (
 	"github.com/sunholo/ailang/internal/eval_harness"
 )
 
+// motoko:begin
+func openRouterModelName(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "openrouter/")
+}
+
+func resolveOpenAIKeyForModel(modelName string, fallback string) string {
+	if openRouterModelName(modelName) {
+		if key := strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")); key != "" {
+			return key
+		}
+	}
+	return strings.TrimSpace(fallback)
+}
+// motoko:end
+
 // setupAIHandler configures the AI effect handler based on CLI flags.
 // Uses the unified internal/ai package for all providers.
 func setupAIHandler(effCtx *effects.EffContext, aiStub bool, aiModel string) error {
@@ -73,9 +88,15 @@ func setupAIHandler(effCtx *effects.EffContext, aiStub bool, aiModel string) err
 		handler = client.NewHandler(model.APIName, opts...)
 
 	case ai.ProviderOpenAI:
+		// motoko:begin
+		apiKey = resolveOpenAIKeyForModel(model.APIName, apiKey)
 		if apiKey == "" {
+			if openRouterModelName(model.APIName) {
+				return fmt.Errorf("OPENROUTER_API_KEY (or %s) environment variable required for model %s", model.EnvVar, aiModel)
+			}
 			return fmt.Errorf("%s environment variable required for model %s", model.EnvVar, aiModel)
 		}
+		// motoko:end
 		client := openai.NewClient(apiKey)
 		handler = client.NewHandler(model.APIName, opts...)
 
@@ -135,10 +156,15 @@ func setupAIHandlerDirect(effCtx *effects.EffContext, modelName string) error {
 		handler = client.NewHandler(modelName)
 
 	case ai.ProviderOpenAI:
-		apiKey := os.Getenv("OPENAI_API_KEY")
+		// motoko:begin
+		apiKey := resolveOpenAIKeyForModel(modelName, os.Getenv("OPENAI_API_KEY"))
 		if apiKey == "" {
+			if openRouterModelName(modelName) {
+				return fmt.Errorf("OPENROUTER_API_KEY (or OPENAI_API_KEY) environment variable required")
+			}
 			return fmt.Errorf("OPENAI_API_KEY environment variable required")
 		}
+		// motoko:end
 		client := openai.NewClient(apiKey)
 		handler = client.NewHandler(modelName)
 
@@ -174,7 +200,9 @@ func setupAIHandlerDirect(effCtx *effects.EffContext, modelName string) error {
 		handler = client.NewHandler(model)
 
 	default:
-		return fmt.Errorf("cannot determine provider for model %s (use models.yml or prefix with claude-/gpt-/gemini-/ollama:)", modelName)
+		// motoko:begin
+		return fmt.Errorf("cannot determine provider for model %s (use models.yml or prefix with claude-/gpt-/gemini-/openrouter-/openai-/ollama:)", modelName)
+		// motoko:end
 	}
 
 	effCtx.AI = effects.NewAIContext(handler)

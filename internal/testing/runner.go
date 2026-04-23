@@ -81,7 +81,7 @@ func (r *Runner) runTest(testCase TestCase) TestResult {
 			result.Duration = time.Since(start)
 			return result
 		}
-		// motoko:endtoto
+		// motoko:end
 
 		// Compare each actual to expected
 		for i, expr := range testCase.Body {

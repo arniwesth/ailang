@@ -41,6 +41,79 @@ func TestRouteOpenRouterMotoko(t *testing.T) {
 	require.Equal(t, "openrouter/gpt-4o-mini", req.Model)
 }
 
+func TestRouteOpenRouterMotoko_UsesOpenRouterAPIKeyFromEnv(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "or-key-123")
+
+	client := NewClient("openai-key-abc")
+	req := &ai.Request{
+		Model:      "openrouter/gpt-4o-mini",
+		UserPrompt: "hello",
+	}
+
+	routedClient, _ := routeOpenRouterMotoko(client, req)
+	require.NotNil(t, routedClient)
+	require.Equal(t, "or-key-123", routedClient.apiKey)
+}
+
+func TestStripOpenAIPrefixMotoko(t *testing.T) {
+	model, ok := stripOpenAIPrefixMotoko("openai/google/gemma-4-26B-A4B-it")
+	require.True(t, ok)
+	require.Equal(t, "google/gemma-4-26B-A4B-it", model)
+
+	_, ok = stripOpenAIPrefixMotoko("openai/")
+	require.False(t, ok)
+
+	_, ok = stripOpenAIPrefixMotoko("gpt-4o")
+	require.False(t, ok)
+}
+
+func TestApplyModelRoutingMotoko_OpenAIPrefixAndBaseURL(t *testing.T) {
+	t.Setenv("OPENAI_BASE_URL", "http://localhost:8000")
+
+	client := NewClient("test-key")
+	req := &ai.Request{
+		Model:      "openai/google/gemma-4-26B-A4B-it",
+		UserPrompt: "hello",
+	}
+
+	routedClient, routedReq := client, req
+	err := applyModelRoutingMotoko(&routedClient, &routedReq)
+	require.NoError(t, err)
+	require.Equal(t, "http://localhost:8000/v1", routedClient.baseURL)
+	require.Equal(t, "google/gemma-4-26B-A4B-it", routedReq.Model)
+	require.Equal(t, defaultBaseURL, client.baseURL)
+	require.Equal(t, "openai/google/gemma-4-26B-A4B-it", req.Model)
+}
+
+func TestApplyModelRoutingMotoko_OpenRouterDoesNotStripNestedOpenAIPrefix(t *testing.T) {
+	client := NewClient("test-key")
+	req := &ai.Request{
+		Model:      "openrouter/openai/gpt-4o-mini",
+		UserPrompt: "hello",
+	}
+
+	routedClient, routedReq := client, req
+	err := applyModelRoutingMotoko(&routedClient, &routedReq)
+	require.NoError(t, err)
+	require.Equal(t, openRouterBaseURLMotoko, routedClient.baseURL)
+	require.Equal(t, "openai/gpt-4o-mini", routedReq.Model)
+}
+
+func TestApplyModelRoutingMotoko_InvalidOpenAIBaseURL(t *testing.T) {
+	t.Setenv("OPENAI_BASE_URL", "localhost:8000")
+
+	client := NewClient("test-key")
+	req := &ai.Request{
+		Model:      "openai/gpt-4o-mini",
+		UserPrompt: "hello",
+	}
+
+	routedClient, routedReq := client, req
+	err := applyModelRoutingMotoko(&routedClient, &routedReq)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid OPENAI_BASE_URL")
+}
+
 func TestGenerate_OpenRouterRouteMotoko(t *testing.T) {
 	var gotPath string
 	var gotModel string
