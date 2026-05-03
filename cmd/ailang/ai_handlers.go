@@ -110,7 +110,9 @@ func setupAIHandler(effCtx *effects.EffContext, aiStub bool, aiModel string) err
 	case ai.ProviderOpenAI:
 		// motoko:begin
 		apiKey = resolveOpenAIKeyForModel(model.APIName, apiKey)
-		if apiKey == "" {
+		// Allow empty API key when OPENAI_BASE_URL is set (custom/local endpoint).
+		customBaseURL := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+		if apiKey == "" && customBaseURL == "" {
 			if openRouterModelName(model.APIName) {
 				return fmt.Errorf("OPENROUTER_API_KEY (or %s) environment variable required for model %s", model.EnvVar, aiModel)
 			}
@@ -186,7 +188,9 @@ func setupAIHandlerDirect(effCtx *effects.EffContext, modelName string) error {
 	case ai.ProviderOpenAI:
 		// motoko:begin
 		apiKey := resolveOpenAIKeyForModel(modelName, os.Getenv("OPENAI_API_KEY"))
-		if apiKey == "" {
+		// Allow empty API key when OPENAI_BASE_URL is set (custom/local endpoint).
+		customBaseURL := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+		if apiKey == "" && customBaseURL == "" {
 			if openRouterModelName(modelName) {
 				return fmt.Errorf("OPENROUTER_API_KEY (or OPENAI_API_KEY) environment variable required")
 			}
