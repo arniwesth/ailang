@@ -17,6 +17,7 @@ type Handler struct {
 	model        string
 	systemPrompt string
 	maxTokens    int
+	requestOpts  map[string]any
 }
 
 // HandlerOption configures a Handler.
@@ -33,6 +34,13 @@ func WithSystemPrompt(prompt string) HandlerOption {
 func WithMaxTokens(tokens int) HandlerOption {
 	return func(h *Handler) {
 		h.maxTokens = tokens
+	}
+}
+
+// WithRequestOptions sets provider-specific request options for all calls.
+func WithRequestOptions(options map[string]any) HandlerOption {
+	return func(h *Handler) {
+		h.requestOpts = options
 	}
 }
 
@@ -69,6 +77,7 @@ func (h *Handler) Call(input string) (string, error) {
 		SystemPrompt: h.systemPrompt,
 		UserPrompt:   input,
 		MaxTokens:    h.maxTokens,
+		Options:      h.requestOpts,
 	})
 	if err != nil {
 		return "", err
@@ -101,6 +110,7 @@ func (h *Handler) CallJson(input string, schema string) (string, error) {
 		MaxTokens:      maxTokens,
 		ResponseFormat: "json",
 		ResponseSchema: schema,
+		Options:        h.requestOpts,
 	})
 	if err != nil {
 		return "", err
@@ -117,6 +127,7 @@ func (h *Handler) CallWithContext(ctx context.Context, input string) (string, er
 		SystemPrompt: h.systemPrompt,
 		UserPrompt:   input,
 		MaxTokens:    h.maxTokens,
+		Options:      h.requestOpts,
 	})
 	if err != nil {
 		return "", err
@@ -132,6 +143,7 @@ func (h *Handler) GenerateWithDetails(ctx context.Context, input string) (*Respo
 		SystemPrompt: h.systemPrompt,
 		UserPrompt:   input,
 		MaxTokens:    h.maxTokens,
+		Options:      h.requestOpts,
 	})
 }
 

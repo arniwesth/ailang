@@ -24,11 +24,40 @@ type chatStreamRequestMotoko struct {
 type chatStreamChunkMotoko struct {
 	Model   string `json:"model"`
 	Choices []struct {
-		Delta struct {
-			Content string `json:"content"`
-		} `json:"delta"`
+		Delta        json.RawMessage `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
+}
+
+func firstDeltaTextMotoko(deltaRaw json.RawMessage) string {
+	if len(deltaRaw) == 0 {
+		return ""
+	}
+	var deltaObj map[string]any
+	if err := json.Unmarshal(deltaRaw, &deltaObj); err != nil {
+		return ""
+	}
+	for _, key := range []string{"content", "reasoning_content", "thinking", "reasoning"} {
+		if v, ok := deltaObj[key].(string); ok && v != "" {
+			return v
+		}
+	}
+	for _, key := range []string{"content", "reasoning_content", "thinking"} {
+		if arr, ok := deltaObj[key].([]any); ok {
+			for _, item := range arr {
+				obj, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				for _, textKey := range []string{"text", "content", "reasoning_content"} {
+					if s, ok := obj[textKey].(string); ok && s != "" {
+						return s
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // GenerateStream implements ai.StreamingProvider for OpenAI models.
@@ -91,6 +120,9 @@ func (c *Client) generateChatStreamMotoko(ctx context.Context, req *ai.Request, 
 		if seed, ok := req.Options["seed"].(int64); ok {
 			apiReq.Seed = &seed
 		}
+		if chatTemplateKwargs, ok := req.Options["chat_template_kwargs"].(map[string]any); ok {
+			apiReq.ChatTemplateKwargs = chatTemplateKwargs
+		}
 	}
 
 	jsonBody, err := json.Marshal(apiReq)
@@ -141,7 +173,7 @@ func (c *Client) generateChatStreamMotoko(ctx context.Context, req *ai.Request, 
 		}
 		sawFinish := false
 		for _, choice := range chunk.Choices {
-			delta := choice.Delta.Content
+			delta := firstDeltaTextMotoko(choice.Delta)
 			if delta == "" {
 				if choice.FinishReason != "" {
 					sawFinish = true

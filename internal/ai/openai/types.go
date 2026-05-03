@@ -12,6 +12,7 @@ type chatRequest struct {
 	MaxCompletionTokens int                 `json:"max_completion_tokens,omitempty"` // GPT-5.1+ use this
 	Temperature         float64             `json:"temperature,omitempty"`
 	Seed                *int64              `json:"seed,omitempty"`
+	ChatTemplateKwargs  map[string]any      `json:"chat_template_kwargs,omitempty"`
 	ResponseFormat      *chatResponseFormat `json:"response_format,omitempty"` // Structured output
 }
 

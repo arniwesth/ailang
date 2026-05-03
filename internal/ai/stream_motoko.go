@@ -37,6 +37,7 @@ func (h *Handler) CallStream(input string, onEvent StreamHandler) (string, error
 			SystemPrompt: h.systemPrompt,
 			UserPrompt:   input,
 			MaxTokens:    h.maxTokens,
+			Options:      h.requestOpts,
 		}, onEvent)
 		if err != nil {
 			return "", err

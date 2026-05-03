@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -34,8 +35,12 @@ func TestReadSSEDataMotoko_OnDataError(t *testing.T) {
 }
 
 func TestGenerateStreamMotoko_ChatSSE(t *testing.T) {
+	var gotTemplateKwargs map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/chat/completions", r.URL.Path)
+		var reqBody chatStreamRequestMotoko
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&reqBody))
+		gotTemplateKwargs = reqBody.ChatTemplateKwargs
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: {\"model\":\"gpt-4o-mini\",\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n")
 		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\n")
@@ -44,7 +49,13 @@ func TestGenerateStreamMotoko_ChatSSE(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient("test-key", WithBaseURL(server.URL))
-	req := &ai.Request{Model: "gpt-4o-mini", UserPrompt: "Say hello"}
+	req := &ai.Request{
+		Model:      "gpt-4o-mini",
+		UserPrompt: "Say hello",
+		Options: map[string]any{
+			"chat_template_kwargs": map[string]any{"enable_thinking": false},
+		},
+	}
 
 	var deltas []ai.StreamEvent
 	resp, err := client.GenerateStream(context.Background(), req, func(ev ai.StreamEvent) error {
@@ -59,6 +70,7 @@ func TestGenerateStreamMotoko_ChatSSE(t *testing.T) {
 	require.Equal(t, "hel", deltas[0].TextDelta)
 	require.Equal(t, 1, deltas[1].Seq)
 	require.Equal(t, "lo", deltas[1].TextDelta)
+	require.Equal(t, false, gotTemplateKwargs["enable_thinking"])
 }
 
 func TestGenerateStreamMotoko_AbortFromHandler(t *testing.T) {
@@ -102,4 +114,20 @@ func TestGenerateStreamMotoko_FinishReasonWithoutDone(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "hi", resp.Text)
 	require.Less(t, elapsed, 1500*time.Millisecond)
+}
+
+func TestGenerateStreamMotoko_ReasoningContentDelta(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"model\":\"gpt-4o-mini\",\"choices\":[{\"delta\":{\"reasoning_content\":\"<thinking>\"}}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"step-by-step\"}}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"</thinking>final\"}}]}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", WithBaseURL(server.URL))
+	resp, err := client.GenerateStream(context.Background(), &ai.Request{Model: "gpt-4o-mini", UserPrompt: "x"}, nil)
+	require.NoError(t, err)
+	require.Equal(t, "<thinking>step-by-step</thinking>final", resp.Text)
 }

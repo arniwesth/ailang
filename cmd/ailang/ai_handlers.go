@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -33,6 +34,18 @@ func resolveOpenAIKeyForModel(modelName string, fallback string) string {
 		}
 	}
 	return strings.TrimSpace(fallback)
+}
+
+func loadAIRequestOptionsFromEnv() (map[string]any, error) {
+	raw := strings.TrimSpace(os.Getenv("MOTOKO_AI_OPTIONS_JSON"))
+	if raw == "" {
+		return nil, nil
+	}
+	var options map[string]any
+	if err := json.Unmarshal([]byte(raw), &options); err != nil {
+		return nil, fmt.Errorf("failed to decode MOTOKO_AI_OPTIONS_JSON: %w", err)
+	}
+	return options, nil
 }
 // motoko:end
 
@@ -75,6 +88,13 @@ func setupAIHandler(effCtx *effects.EffContext, aiStub bool, aiModel string) err
 	var opts []ai.HandlerOption
 	if model.MaxOutputTokens > 0 {
 		opts = append(opts, ai.WithMaxTokens(model.MaxOutputTokens))
+	}
+	requestOpts, err := loadAIRequestOptionsFromEnv()
+	if err != nil {
+		return err
+	}
+	if requestOpts != nil {
+		opts = append(opts, ai.WithRequestOptions(requestOpts))
 	}
 
 	// Create handler based on provider using unified ai package
@@ -145,6 +165,14 @@ func setupAIHandlerDirect(effCtx *effects.EffContext, modelName string) error {
 	provider := ai.GuessProvider(modelName)
 
 	var handler effects.AIHandler
+	var opts []ai.HandlerOption
+	requestOpts, err := loadAIRequestOptionsFromEnv()
+	if err != nil {
+		return err
+	}
+	if requestOpts != nil {
+		opts = append(opts, ai.WithRequestOptions(requestOpts))
+	}
 
 	switch provider {
 	case ai.ProviderAnthropic:
@@ -153,7 +181,7 @@ func setupAIHandlerDirect(effCtx *effects.EffContext, modelName string) error {
 			return fmt.Errorf("ANTHROPIC_API_KEY environment variable required")
 		}
 		client := anthropic.NewClient(apiKey)
-		handler = client.NewHandler(modelName)
+		handler = client.NewHandler(modelName, opts...)
 
 	case ai.ProviderOpenAI:
 		// motoko:begin
@@ -166,18 +194,18 @@ func setupAIHandlerDirect(effCtx *effects.EffContext, modelName string) error {
 		}
 		// motoko:end
 		client := openai.NewClient(apiKey)
-		handler = client.NewHandler(modelName)
+		handler = client.NewHandler(modelName, opts...)
 
 	case ai.ProviderGoogle:
 		// Precedence: ADC first (if available), then GOOGLE_API_KEY.
 		apiKey := os.Getenv("GOOGLE_API_KEY")
 		if client, err := gemini.NewVertexAIClient(""); err == nil {
 			fmt.Fprintf(os.Stderr, "AI: Using Vertex AI (ADC)\n")
-			handler = client.NewHandler(modelName)
+			handler = client.NewHandler(modelName, opts...)
 		} else if apiKey != "" {
 			fmt.Fprintf(os.Stderr, "AI: Using Google AI Studio (GOOGLE_API_KEY)\n")
 			client := gemini.NewClient(apiKey)
-			handler = client.NewHandler(modelName)
+			handler = client.NewHandler(modelName, opts...)
 		} else {
 			return fmt.Errorf("Gemini auth failed: Application Default Credentials (ADC) not configured, and GOOGLE_API_KEY is not set.\n"+
 				"  Option 1: gcloud auth application-default login  (recommended, for Vertex AI)\n"+
@@ -197,7 +225,7 @@ func setupAIHandlerDirect(effCtx *effects.EffContext, modelName string) error {
 		}
 		// Strip ollama: prefix if present
 		model := strings.TrimPrefix(modelName, "ollama:")
-		handler = client.NewHandler(model)
+		handler = client.NewHandler(model, opts...)
 
 	default:
 		// motoko:begin

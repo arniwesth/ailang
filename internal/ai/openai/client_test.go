@@ -374,6 +374,64 @@ func TestClient_Generate_ChatCompletions_WithSeed(t *testing.T) {
 	}
 }
 
+func TestClient_Generate_ChatCompletions_WithChatTemplateKwargs(t *testing.T) {
+	var received map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody chatRequest
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+		received = reqBody.ChatTemplateKwargs
+
+		resp := chatResponse{
+			Choices: []chatChoice{{Message: chatMessage{Content: "ok"}}},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", WithBaseURL(server.URL))
+	_, _ = client.Generate(context.Background(), &ai.Request{
+		Model:      "gpt-4",
+		UserPrompt: "test",
+		Options: map[string]any{
+			"chat_template_kwargs": map[string]any{"enable_thinking": true},
+		},
+	})
+
+	if received == nil {
+		t.Fatalf("ChatTemplateKwargs missing")
+	}
+	if got, ok := received["enable_thinking"].(bool); !ok || !got {
+		t.Fatalf("enable_thinking = %v, want true", received["enable_thinking"])
+	}
+}
+
+func TestClient_Generate_ChatCompletions_OmitsChatTemplateKwargsWhenUnset(t *testing.T) {
+	var received map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody chatRequest
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+		received = reqBody.ChatTemplateKwargs
+
+		resp := chatResponse{
+			Choices: []chatChoice{{Message: chatMessage{Content: "ok"}}},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", WithBaseURL(server.URL))
+	_, _ = client.Generate(context.Background(), &ai.Request{
+		Model:      "gpt-4",
+		UserPrompt: "test",
+	})
+
+	if received != nil {
+		t.Fatalf("ChatTemplateKwargs = %v, want nil", received)
+	}
+}
+
 func TestClient_Generate_ChatCompletions_DefaultMaxTokens(t *testing.T) {
 	var receivedMaxTokens int
 

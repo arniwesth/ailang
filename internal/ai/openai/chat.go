@@ -54,6 +54,9 @@ func (c *Client) generateChat(ctx context.Context, req *ai.Request) (*ai.Respons
 		if seed, ok := req.Options["seed"].(int64); ok {
 			apiReq.Seed = &seed
 		}
+		if chatTemplateKwargs, ok := req.Options["chat_template_kwargs"].(map[string]any); ok {
+			apiReq.ChatTemplateKwargs = chatTemplateKwargs
+		}
 	}
 
 	// Add structured output configuration
